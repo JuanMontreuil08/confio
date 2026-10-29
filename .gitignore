@@ -1,1 +1,2 @@
 .pio/
+esp32/camera/include/wifi_credentials.h

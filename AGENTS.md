@@ -31,6 +31,15 @@ This file describes the **first target flow only**, at a high level. Details wil
 2. Add the servo search loop.
 3. Later: move mic and speaker onto the gadget (INMP441 + MAX98357).
 
+## Hardware test progress and next steps
+- The ESP32 DevKit V1 button is wired between GPIO 27 and GND using the internal pull-up. The user verified repeated presses in the serial monitor. The tested four-leg button needs connections on different switch contacts; the initial same-row pairing did not work.
+- The ESP32-CAM with OV2640 and a USB adapter base connects to WiFi and has captured photos in `media/`. A live-stream firmware update compiled, but smoothness and stability still need further testing.
+- Both test photos show horizontal lines and are dark. Investigate in better light, check the camera ribbon with USB disconnected, and try a known stable 5 V supply and cable. The cause is not yet confirmed.
+- Obtain a second micro-USB cable so the button board can stay connected to the laptop while the camera is powered separately in the living room. Verify the camera's power adapter provides 5 V and ideally at least 2 A.
+- Place the fixed camera in the living room and verify power, WiFi coverage, live view, and photo capture from the bedroom. Check whether any freeze affects only video or the entire camera page.
+- Next integrate the button with the laptop so pressing Ver opens the camera view, then save a requested photo automatically under `media/`. The current photo button downloads through the browser instead.
+- Add the servo search loop after the fixed-camera test works; move microphone and speaker to the gadget later. WiFi credentials belong only in the ignored local `esp32/camera/include/wifi_credentials.h` file.
+
 ## Guidelines
 - Keep it simple and demo-first.
 - User-facing language is Spanish; code and docs are in English.
