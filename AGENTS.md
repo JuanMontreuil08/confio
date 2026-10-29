@@ -40,6 +40,13 @@ This file describes the **first target flow only**, at a high level. Details wil
 - Next integrate the button with the laptop so pressing Ver opens the camera view, then save a requested photo automatically under `media/`. The current photo button downloads through the browser instead.
 - Add the servo search loop after the fixed-camera test works; move microphone and speaker to the gadget later. WiFi credentials belong only in the ignored local `esp32/camera/include/wifi_credentials.h` file.
 
+## Vision test progress (SAM 3.1)
+- `scripts/find_object.py <image> "<noun phrase>"` sends a local image to `sam-3.1` on the Meta Model API through the OpenAI Python SDK (`base_url=https://api.meta.ai/v1`), non-streaming, with `include_confidence: "true"`. The key is read from `SAM_API_KEY` in the ignored root `.env` file.
+- It parses only the `<|box;...|>` tokens with a regex (masks are ignored); an empty output means no match. When found, it prints the box, confidence, and left/center/right position, and saves the image with boxes drawn to `media/output/`.
+- Verified on `media/camera-test-2.jpg` with "white mouse": 1 match, box (180, 182) -> (246, 313), confidence 0.77. The box frames the mouse correctly despite the dark, striped photo.
+- Per Meta's docs, SAM gives geometry only (boxes and masks); captions and answers about a scene belong to Muse Spark. Planned split: Muse Spark extracts the target noun phrase from the spoken request, SAM decides found/not found per photo in the search loop, and Muse Spark writes the final Spanish answer from the photo where the object was found.
+- Next: consider removing `horizontal_position()` once Muse Spark writes the answer, consider Meta's `meta-sam-parser` (>= 0.0.6 for confidence) instead of the regex, and wrap the script as the agent's `find_object` tool.
+
 ## Guidelines
 - Keep it simple and demo-first.
 - User-facing language is Spanish; code and docs are in English.
