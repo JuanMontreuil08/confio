@@ -2,3 +2,6 @@
 esp32/camera/include/wifi_credentials.h
 .env
 __pycache__/
+.telnyx-public-key
+.telnyx-webrtc.json
+.telnyx-webrtc.tmp

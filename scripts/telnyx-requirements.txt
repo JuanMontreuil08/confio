@@ -1,0 +1,3 @@
+cryptography>=44
+python-dotenv>=1.0
+certifi>=2024.2.2
