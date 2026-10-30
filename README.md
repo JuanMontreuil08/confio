@@ -47,3 +47,35 @@ Many older adults find smartphones confusing, but they can still benefit from an
 
 - Keep it simple and demo-first.
 - The user-facing language is Spanish; code and docs are in English.
+
+## Call button preview
+
+The protoboard Call button (GPIO 26) and Look button (GPIO 27) have been verified
+by the user. The Call UI prototype lives in `web/call/` on branch
+`codex/llamar-prototype`.
+
+Close PlatformIO Serial Monitor and run from the repository root:
+
+```sh
+~/.platformio/penv/bin/python scripts/call_preview.py
+```
+
+Open **http://localhost:8765/** to preview it immediately. Pressing Call also
+prints the URL and opens the page. For a real browser-to-phone audio test:
+
+```sh
+python3 -m pip install -r scripts/call-requirements.txt -r scripts/telnyx-requirements.txt
+python3 scripts/call_preview.py --live --to "+51XXXXXXXXX"
+```
+
+Click **Talk with your agent** and allow the microphone. The phone's voice drives
+the waveform; Mute silences your microphone and End call hangs up. No AI agent
+is connected yet. See [the browser call instructions](web/call/README.md).
+
+## Telnyx call test setup
+
+The Voice API application and temporary signed webhook receiver are configured.
+See [the local Telnyx setup](scripts/TELNYX.md) for connection values and commands.
+The user confirmed the full button-to-browser call flow, two-way audio, remote
+voice waves, microphone mute and hangup. Replace the example destination in the
+commands with your own number; the personal test number is not committed.
