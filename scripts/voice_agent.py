@@ -85,6 +85,7 @@ TOOLS = [{
     "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
 }]
 MAX_TOOL_ROUNDS = 3
+REASONING_EFFORT = "medium"  # Spark rejects "none"; "low" is faster for direct answers
 
 
 def run_tool(name, arguments):
@@ -100,28 +101,30 @@ def run_tool(name, arguments):
     return TOOL_FUNCTIONS[name]()
 
 
-def answer(client, system_prompt, question, model=CHAT_MODEL):
-    """Asks the Meta model (Responses API) for a short spoken answer, running any tools it requests."""
-    response = client.responses.create(
-        model=model,
-        input=[{"role": "system", "content": system_prompt},
-               {"role": "user", "content": question}],
-        tools=TOOLS,
-    )
+def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_EFFORT):
+    """Asks the Meta model (Responses API) for a short spoken answer, running any tools it requests.
+
+    Stateless: each request resends the whole turn, including the model's encrypted
+    reasoning, instead of using previous_response_id. In testing this cut the
+    post-tool call from 10-16 s to 3-5 s and avoided "persistence service" 503s.
+    """
+    history = [{"role": "system", "content": system_prompt},
+               {"role": "user", "content": question}]
     for round_number in range(MAX_TOOL_ROUNDS + 1):
+        response = client.responses.create(
+            model=model, input=history, tools=TOOLS, reasoning={"effort": effort},
+            store=False, include=["reasoning.encrypted_content"])
         calls = [item for item in response.output if item.type == "function_call"]
         if not calls:
             return (response.output_text or "").strip()
         if round_number == MAX_TOOL_ROUNDS:
             raise RuntimeError(f"Model still requesting tools after {MAX_TOOL_ROUNDS} rounds")
-        outputs = []
+        history += [item.model_dump(exclude_none=True) for item in response.output]
         for call in calls:
             result = run_tool(call.name, call.arguments)
             log.info("Tool %s(%s) -> %s", call.name, call.arguments, json.dumps(result))
-            outputs.append({"type": "function_call_output", "call_id": call.call_id,
+            history.append({"type": "function_call_output", "call_id": call.call_id,
                             "output": json.dumps(result)})
-        response = client.responses.create(
-            model=model, input=outputs, previous_response_id=response.id, tools=TOOLS)
 
 
 def synthesize(session, api_key, voice_id, text):
@@ -140,7 +143,8 @@ def synthesize(session, api_key, voice_id, text):
 
 
 class Agent:
-    def __init__(self, meta_key, cartesia_key, voice_id, system_prompt, turn_dir, model=CHAT_MODEL):
+    def __init__(self, meta_key, cartesia_key, voice_id, system_prompt, turn_dir, model=CHAT_MODEL,
+                 effort=REASONING_EFFORT):
         self.session = requests.Session()
         self.client = OpenAI(base_url=META_BASE_URL, api_key=meta_key, timeout=HTTP_TIMEOUT)
         self.meta_key = meta_key
@@ -150,6 +154,7 @@ class Agent:
         self.turn_dir = turn_dir
         self.turn = 0
         self.model = model
+        self.effort = effort
 
     def handle(self, voice_pcm):
         """Runs one turn and returns the PCM to play, or None when there is nothing to say."""
@@ -171,7 +176,7 @@ class Agent:
             return None
 
         started = time.monotonic()
-        reply = answer(self.client, self.system_prompt, question, self.model)
+        reply = answer(self.client, self.system_prompt, question, self.model, self.effort)
         log.info("Turn %d: %s %.2f s -> %r", self.turn, self.model, time.monotonic() - started, reply)
         if not reply:
             log.info("Turn %d: empty answer, nothing to say", self.turn)
@@ -197,6 +202,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", help="ESP32 serial port")
     parser.add_argument("--model", default=CHAT_MODEL, help="Meta chat model")
+    parser.add_argument("--effort", default=REASONING_EFFORT,
+                        choices=["minimal", "low", "medium", "high", "xhigh", "max"], help="reasoning effort")
     parser.add_argument("--voice-id", default=DEFAULT_VOICE_ID, help="Cartesia voice ID")
     args = parser.parse_args()
 
@@ -210,8 +217,9 @@ def main():
     turn_dir = LOG_DIR / f"voice-agent-{started}"
     turn_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(LOG_DIR / f"voice-agent-{started}.log")
-    agent = Agent(meta_key, cartesia_key, args.voice_id, SYSTEM_PROMPT_PATH.read_text().strip(), turn_dir, args.model)
-    log.info("Models: %s, %s, %s (voice %s)", TRANSCRIBE_MODEL, args.model, TTS_MODEL, args.voice_id)
+    agent = Agent(meta_key, cartesia_key, args.voice_id, SYSTEM_PROMPT_PATH.read_text().strip(), turn_dir, args.model, args.effort)
+    log.info("Models: %s, %s (effort %s), %s (voice %s)", TRANSCRIBE_MODEL, args.model, args.effort,
+             TTS_MODEL, args.voice_id)
     log.info("Audio files for each turn: %s", turn_dir.relative_to(ROOT))
 
     link = VoiceLink(args.port or find_port(), log=log.info)

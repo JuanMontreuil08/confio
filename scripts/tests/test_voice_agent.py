@@ -40,8 +40,13 @@ def text_response(text, response_id="resp_text"):
     return types.SimpleNamespace(id=response_id, output=[message], output_text=text)
 
 
+class FakeItem(types.SimpleNamespace):
+    def model_dump(self, exclude_none=False):
+        return dict(vars(self))
+
+
 def tool_response(name="get_current_datetime", arguments="{}", response_id="resp_tool"):
-    call = types.SimpleNamespace(type="function_call", name=name, arguments=arguments, call_id="call_1")
+    call = FakeItem(type="function_call", name=name, arguments=arguments, call_id="call_1")
     return types.SimpleNamespace(id=response_id, output=[call], output_text="")
 
 
@@ -72,6 +77,7 @@ class VoiceAgentTests(unittest.TestCase):
         agent.voice_id, agent.system_prompt = "voice-test", "system-test"
         agent.turn_dir, agent.turn = self.dir, 0
         agent.model = voice_agent.CHAT_MODEL
+        agent.effort = voice_agent.REASONING_EFFORT
         return agent
 
     def test_full_turn_calls_each_service_and_saves_audio(self):
@@ -95,6 +101,9 @@ class VoiceAgentTests(unittest.TestCase):
         self.assertEqual(chat["input"], [{"role": "system", "content": "system-test"},
                                          {"role": "user", "content": "¿Qué hora es?"}])
         self.assertEqual(chat["tools"][0]["name"], "get_current_datetime")
+        self.assertEqual(chat["reasoning"], {"effort": "medium"})
+        self.assertIs(chat["store"], False)
+        self.assertEqual(chat["include"], ["reasoning.encrypted_content"])
 
         url, kwargs = session.calls[1]
         self.assertEqual(url, voice_agent.CARTESIA_URL)
@@ -116,10 +125,12 @@ class VoiceAgentTests(unittest.TestCase):
         client, calls = fake_client(tool_response(), text_response("Hoy es sábado."))
         self.assertEqual(voice_agent.answer(client, "system", "¿Qué día es?"), "Hoy es sábado.")
         second = calls[1]
-        self.assertEqual(second["previous_response_id"], "resp_tool")
-        output = second["input"][0]
-        self.assertEqual((output["type"], output["call_id"]), ("function_call_output", "call_1"))
-        self.assertIn("weekday", json.loads(output["output"]))
+        self.assertNotIn("previous_response_id", second)
+        history = second["input"]
+        self.assertEqual([item.get("role") or item["type"] for item in history],
+                         ["system", "user", "function_call", "function_call_output"])
+        self.assertEqual(history[3]["call_id"], "call_1")
+        self.assertIn("weekday", json.loads(history[3]["output"]))
 
     def test_bad_tool_requests_return_errors_to_the_model(self):
         self.assertIn("error", voice_agent.run_tool("delete_everything", "{}"))
