@@ -5,3 +5,4 @@ __pycache__/
 .telnyx-public-key
 .telnyx-webrtc.json
 .telnyx-webrtc.tmp
+logs/
