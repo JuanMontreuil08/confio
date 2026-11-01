@@ -36,7 +36,7 @@ class FakeSession:
 
 
 def text_response(text, response_id="resp_text"):
-    message = types.SimpleNamespace(type="message")
+    message = FakeItem(type="message", role="assistant", content=[{"type": "output_text", "text": text}])
     return types.SimpleNamespace(id=response_id, output=[message], output_text=text)
 
 
@@ -79,6 +79,7 @@ class VoiceAgentTests(unittest.TestCase):
         agent.model = voice_agent.CHAT_MODEL
         agent.effort = voice_agent.REASONING_EFFORT
         agent.contacts, agent.tools, agent.pending_call = {}, voice_agent.TOOLS, None
+        agent.history, agent.idle_since, agent.photos, agent.capture_result = [], None, None, None
         return agent
 
     def test_full_turn_calls_each_service_and_saves_audio(self):
@@ -138,9 +139,9 @@ class VoiceAgentTests(unittest.TestCase):
     def test_web_search_answer_logs_sources_and_skips_commentary(self):
         def message(text, phase=None):
             block = types.SimpleNamespace(type="output_text", text=text, annotations=[])
-            return types.SimpleNamespace(type="message", phase=phase, content=[block])
+            return FakeItem(type="message", phase=phase, content=[block])
         result = {"title": "RadiologyInfo", "url": "https://radiologyinfo.org/x"}  # SDK leaves these as dicts
-        search = types.SimpleNamespace(type="web_search_call", results=[result],
+        search = FakeItem(type="web_search_call", results=[result],
                                        action={"query": "histerosonografía"})
         output = [message("Voy a buscarlo.", "commentary"), search,
                   message("Según **RadiologyInfo**, es una ecografía [RadiologyInfo](https://radiologyinfo.org/x).")]

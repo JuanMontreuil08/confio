@@ -6,8 +6,8 @@ Usage (from the repository root, with the esp32/voice firmware on the board):
 
 Reads META_API_KEY and CARTESIA_API_KEY from the environment or the root .env.
 Every turn is logged to logs/voice-agent-<start time>.log, with the recorded
-voice and the spoken answer saved as WAV files next to it. Each question is
-independent: there is no conversation memory yet.
+voice and the spoken answer saved as WAV files next to it. Conversation context
+stays in RAM until five minutes of idle waiting have elapsed.
 """
 import argparse
 import io
@@ -45,6 +45,7 @@ TTS_MODEL = "sonic-3.6"
 DEFAULT_VOICE_ID = "b4b8e2af-6139-466e-a93a-30c20d2e1fc5"
 MIN_RECORDING_SECONDS = 0.4
 HTTP_TIMEOUT = 60
+IDLE_SECONDS = 300
 
 log = logging.getLogger("voice_agent")
 
@@ -155,32 +156,37 @@ def spoken(text):
 
 
 def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_EFFORT,
-           tools=TOOLS, run=run_tool):
+           tools=TOOLS, run=run_tool, history=None, max_rounds=MAX_TOOL_ROUNDS):
     """Asks the Meta model (Responses API) for a short spoken answer, running any tools it requests.
 
     Stateless: each request resends the whole turn, including the model's encrypted
     reasoning, instead of using previous_response_id. In testing this cut the
     post-tool call from 10-16 s to 3-5 s and avoided "persistence service" 503s.
     """
-    history = [{"role": "system", "content": system_prompt},
-               {"role": "user", "content": question}]
-    for round_number in range(MAX_TOOL_ROUNDS + 1):
+    if history is None:
+        history = []
+    if not history:
+        history.append({"role": "system", "content": system_prompt})
+    history.append({"role": "user", "content": question})
+    for round_number in range(max_rounds + 1):
         response = client.responses.create(
-            model=model, input=history, tools=tools, reasoning={"effort": effort},
+            model=model, input=list(history), tools=tools, reasoning={"effort": effort},
             store=False, include=["reasoning.encrypted_content", "web_search_call.results"],
             extra_body={"max_tool_calls": MAX_SEARCHES})  # older SDKs lack this argument
         log_searches(response)
         calls = [item for item in response.output if item.type == "function_call"]
+        # Preserve ALL output, including the final answer and encrypted reasoning.
+        history += [item.model_dump(exclude_none=True) for item in response.output]
         if not calls:
             return spoken(final_text(response))
-        if round_number == MAX_TOOL_ROUNDS:
-            raise RuntimeError(f"Model still requesting tools after {MAX_TOOL_ROUNDS} rounds")
-        history += [item.model_dump(exclude_none=True) for item in response.output]
         for call in calls:
-            result = run(call.name, call.arguments)
+            result = ({"error": "Tool round limit reached. No action was executed."}
+                      if round_number == max_rounds else run(call.name, call.arguments))
             log.info("Tool %s(%s) -> %s", call.name, call.arguments, json.dumps(result))
             history.append({"type": "function_call_output", "call_id": call.call_id,
                             "output": json.dumps(result)})
+        if round_number == max_rounds:
+            raise RuntimeError(f"Model still requesting tools after {max_rounds} rounds")
 
 
 def synthesize(session, api_key, voice_id, text):
@@ -236,7 +242,7 @@ CALL_OUTCOMES = {
 
 class Agent:
     def __init__(self, meta_key, cartesia_key, voice_id, system_prompt, turn_dir, model=CHAT_MODEL,
-                 effort=REASONING_EFFORT, contacts=None):
+                 effort=REASONING_EFFORT, contacts=None, photos=None, enable_calls=True):
         self.session = requests.Session()
         self.client = OpenAI(base_url=META_BASE_URL, api_key=meta_key, timeout=HTTP_TIMEOUT)
         self.meta_key = meta_key
@@ -248,10 +254,24 @@ class Agent:
         self.model = model
         self.effort = effort
         self.contacts = contacts or {}
-        self.tools = TOOLS + ([call_tool(list(self.contacts))] if self.contacts else [])
+        self.photos = photos
+        self.history = []
+        self.idle_since = None
+        self.capture_result = None
+        self.tools = TOOLS + ([call_tool(list(self.contacts))] if self.contacts and enable_calls else [])
+        if photos:
+            from photo_tools import photo_tools
+            self.tools += photo_tools(list(self.contacts))
         self.pending_call = None  # (name, number) chosen by the model during this turn
 
     def run_tool(self, name, arguments):
+        if getattr(self, "photos", None) and name in ("take_photo", "save_photo", "send_photo_sms"):
+            if name == "take_photo" and self.capture_result is not None:
+                return self.capture_result
+            result = self.photos.run(name, arguments)
+            if name == "take_photo":
+                self.capture_result = result  # one capture/restoration attempt per voice turn
+            return result
         if name != "call_contact" or not self.contacts:
             return run_tool(name, arguments)
         try:
@@ -274,7 +294,24 @@ class Agent:
         log.info("Saying %r", text)
         return synthesize(self.session, self.cartesia_key, self.voice_id, text)
 
-    def handle(self, voice_pcm):
+    def begin_turn(self, started_at=None):
+        started_at = time.monotonic() if started_at is None else started_at
+        if self.idle_since is not None and started_at - self.idle_since >= IDLE_SECONDS:
+            self.history.clear()
+            if self.photos:
+                self.photos.reset()
+            log.info("Conversation cleared after five minutes idle")
+        self.idle_since = None  # no expiry during recording, tools, playback or calls
+        self.capture_result = None
+
+    def mark_idle(self):
+        self.idle_since = time.monotonic()
+
+    def remember_call_outcome(self, name, outcome):
+        self.history.append({"role": "developer", "content": "Actual phone call outcome: " +
+                             json.dumps({"contact": name, "status": outcome})})
+
+    def handle(self, voice_pcm, started_at=None):
         """Runs one turn and returns the PCM to play, or None when there is nothing to say."""
         self.turn += 1
         self.pending_call = None
@@ -294,9 +331,15 @@ class Agent:
             log.info("Turn %d: empty transcript, nothing to answer", self.turn)
             return None
 
+        self.begin_turn(started_at)
+        if self.photos:
+            for result in self.photos.refresh_sms():
+                self.history.append({"role": "developer", "content": "Actual SMS delivery update: " + json.dumps(result)})
+
         started = time.monotonic()
         reply = answer(self.client, self.system_prompt, question, self.model, self.effort,
-                       self.tools, self.run_tool)
+                       self.tools, self.run_tool, history=self.history,
+                       max_rounds=6 if self.photos else MAX_TOOL_ROUNDS)
         log.info("Turn %d: %s %.2f s -> %r", self.turn, self.model, time.monotonic() - started, reply)
         if not reply:
             log.info("Turn %d: empty answer, nothing to say", self.turn)
@@ -366,8 +409,19 @@ def main():
     contacts, phone = {}, None
     if args.public_url:
         phone, contacts = start_phone(args.public_url, args.http_port)
+    photos = None
+    if os.environ.get("CAMERA_URL"):
+        from photo_tools import PHOTO_ENV, PhotoTools
+        missing = [key for key in PHOTO_ENV if not os.environ.get(key, "").strip()]
+        if missing:
+            raise SystemExit("Photos need in .env: " + ", ".join(missing))
+        if not contacts:
+            contacts = load_contacts()
+        photos = PhotoTools({key: os.environ[key].strip() for key in PHOTO_ENV}, meta_key,
+                            turn_dir / "photos", contacts)
+        log.info("Photo restoration, Supabase and SMS tools enabled")
     agent = Agent(meta_key, cartesia_key, args.voice_id, SYSTEM_PROMPT_PATH.read_text().strip(), turn_dir,
-                  args.model, args.effort, contacts)
+                  args.model, args.effort, contacts, photos=photos, enable_calls=bool(phone))
     log.info("Models: %s, %s (effort %s), %s (voice %s)", TRANSCRIBE_MODEL, args.model, args.effort,
              TTS_MODEL, args.voice_id)
     log.info("Audio files for each turn: %s", turn_dir.relative_to(ROOT))
@@ -380,24 +434,37 @@ def main():
         while True:
             voice = link.record()
             try:
-                speech = agent.handle(voice)
+                speech = agent.handle(voice, started_at=link.record_started_at)
             except Exception as error:  # keep the agent alive between turns
                 log.error("Turn %d failed: %s", agent.turn, error)
+                if agent.pending_call:
+                    agent.remember_call_outcome(agent.pending_call[0], "not_started")
+                    agent.pending_call = None
+                agent.mark_idle()
                 continue
-            if speech:
-                started_play = time.monotonic()
-                link.play(speech)
-                log.info("Turn %d: played answer in %.1f s", agent.turn, time.monotonic() - started_play)
-            if agent.pending_call and phone:
-                name, number = agent.pending_call
-                agent.pending_call = None
-                log.info("Turn %d: calling %s", agent.turn, name)
-                outcome = phone.call(link, number)
-                log.info("Turn %d: call outcome %s", agent.turn, outcome)
-                try:
-                    link.play(agent.say(CALL_OUTCOMES[outcome or "failed"].format(name=name)))
-                except Exception as error:
-                    log.error("Could not announce the call outcome: %s", error)
+            try:
+                if speech:
+                    started_play = time.monotonic()
+                    link.play(speech)
+                    log.info("Turn %d: played answer in %.1f s", agent.turn, time.monotonic() - started_play)
+                if agent.pending_call and phone:
+                    name, number = agent.pending_call
+                    agent.pending_call = None
+                    log.info("Turn %d: calling %s", agent.turn, name)
+                    outcome = "failed"
+                    try:
+                        outcome = phone.call(link, number) or "failed"
+                    finally:
+                        agent.remember_call_outcome(name, outcome)
+                    log.info("Turn %d: call outcome %s", agent.turn, outcome)
+                    try:
+                        announcement = CALL_OUTCOMES[outcome].format(name=name)
+                        link.play(agent.say(announcement))
+                        agent.history.append({"role": "assistant", "content": announcement})
+                    except Exception as error:
+                        log.error("Could not announce the call outcome: %s", error)
+            finally:
+                agent.mark_idle()
     except KeyboardInterrupt:
         log.info("Stopped")
     finally:
