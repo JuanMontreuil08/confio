@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 import sys
 import time
+import unicodedata
 import wave
 
 import requests
@@ -27,9 +28,12 @@ from openai import OpenAI
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "esp32" / "voice"))
+sys.path.insert(0, str(ROOT / "scripts"))
 from voice_link import SAMPLE_RATE, VoiceLink, find_port  # noqa: E402
 
 SYSTEM_PROMPT_PATH = ROOT / "prompts" / "assistant_system.md"
+CONTACTS_PATH = ROOT / "contacts.json"  # ignored by git: {"Name": "+51999999999"}
+PUBLIC_KEY_PATH = ROOT / ".telnyx-public-key"
 LOG_DIR = ROOT / "logs"
 META_BASE_URL = "https://api.meta.ai/v1"
 TRANSCRIBE_URL = META_BASE_URL + "/asr/transcribe"
@@ -150,7 +154,8 @@ def spoken(text):
     return re.sub(r"\s+([.,;:!?])", r"\1", re.sub(r"\s{2,}", " ", text)).strip()
 
 
-def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_EFFORT):
+def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_EFFORT,
+           tools=TOOLS, run=run_tool):
     """Asks the Meta model (Responses API) for a short spoken answer, running any tools it requests.
 
     Stateless: each request resends the whole turn, including the model's encrypted
@@ -161,7 +166,7 @@ def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_E
                {"role": "user", "content": question}]
     for round_number in range(MAX_TOOL_ROUNDS + 1):
         response = client.responses.create(
-            model=model, input=history, tools=TOOLS, reasoning={"effort": effort},
+            model=model, input=history, tools=tools, reasoning={"effort": effort},
             store=False, include=["reasoning.encrypted_content", "web_search_call.results"],
             extra_body={"max_tool_calls": MAX_SEARCHES})  # older SDKs lack this argument
         log_searches(response)
@@ -172,7 +177,7 @@ def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_E
             raise RuntimeError(f"Model still requesting tools after {MAX_TOOL_ROUNDS} rounds")
         history += [item.model_dump(exclude_none=True) for item in response.output]
         for call in calls:
-            result = run_tool(call.name, call.arguments)
+            result = run(call.name, call.arguments)
             log.info("Tool %s(%s) -> %s", call.name, call.arguments, json.dumps(result))
             history.append({"type": "function_call_output", "call_id": call.call_id,
                             "output": json.dumps(result)})
@@ -193,9 +198,45 @@ def synthesize(session, api_key, voice_id, text):
     return response.content
 
 
+def contact_key(name):
+    """Case- and accent-insensitive contact name ("Náty " == "naty")."""
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    return " ".join(plain.lower().split())
+
+
+def load_contacts(path=CONTACTS_PATH):
+    from telnyx_call import phone_number
+    contacts = json.loads(path.read_text())
+    if not isinstance(contacts, dict) or not contacts:
+        raise SystemExit(f"{path.name} must map names to numbers, like contacts.example.json")
+    return {name: phone_number(number) for name, number in contacts.items()}
+
+
+def call_tool(names):
+    return {
+        "type": "function",
+        "name": "call_contact",
+        "description": "Place a phone call to one of the user's saved contacts and connect them. "
+                       "Saved contacts: " + ", ".join(names) + ".",
+        "parameters": {"type": "object",
+                       "properties": {"name": {"type": "string", "description": "The saved contact's name"}},
+                       "required": ["name"], "additionalProperties": False},
+    }
+
+
+# Spoken by the agent after each call; {name} is the saved contact name.
+CALL_OUTCOMES = {
+    "ended": "La llamada con {name} terminó.",
+    "no_answer": "{name} no contestó.",
+    "machine": "{name} no contestó, respondió el buzón de voz.",
+    "cancelled": "Listo, cancelé la llamada a {name}.",
+    "failed": "No pude llamar a {name}. Inténtalo más tarde.",
+}
+
+
 class Agent:
     def __init__(self, meta_key, cartesia_key, voice_id, system_prompt, turn_dir, model=CHAT_MODEL,
-                 effort=REASONING_EFFORT):
+                 effort=REASONING_EFFORT, contacts=None):
         self.session = requests.Session()
         self.client = OpenAI(base_url=META_BASE_URL, api_key=meta_key, timeout=HTTP_TIMEOUT)
         self.meta_key = meta_key
@@ -206,10 +247,37 @@ class Agent:
         self.turn = 0
         self.model = model
         self.effort = effort
+        self.contacts = contacts or {}
+        self.tools = TOOLS + ([call_tool(list(self.contacts))] if self.contacts else [])
+        self.pending_call = None  # (name, number) chosen by the model during this turn
+
+    def run_tool(self, name, arguments):
+        if name != "call_contact" or not self.contacts:
+            return run_tool(name, arguments)
+        try:
+            args = json.loads(arguments or "{}")
+        except json.JSONDecodeError:
+            return {"error": "Arguments are not valid JSON"}
+        if set(args) != {"name"} or not isinstance(args["name"], str):
+            return {"error": "Pass only the contact name"}
+        if self.pending_call:
+            return {"error": "A call is already being placed in this turn"}
+        match = next((saved for saved in self.contacts if contact_key(saved) == contact_key(args["name"])), None)
+        if not match:
+            return {"error": f"No saved contact named {args['name']}", "saved_contacts": list(self.contacts)}
+        # Only numbers from the saved contacts are ever dialed, never one from the transcript.
+        self.pending_call = (match, self.contacts[match])
+        return {"status": "calling", "contact": match}
+
+    def say(self, text):
+        """Speaks a fixed sentence (no model call), returning PCM for the speaker."""
+        log.info("Saying %r", text)
+        return synthesize(self.session, self.cartesia_key, self.voice_id, text)
 
     def handle(self, voice_pcm):
         """Runs one turn and returns the PCM to play, or None when there is nothing to say."""
         self.turn += 1
+        self.pending_call = None
         prefix = self.turn_dir / f"turn-{self.turn:02d}"
         seconds = len(voice_pcm) / 2 / SAMPLE_RATE
         log.info("Turn %d: recorded %.1f s of voice", self.turn, seconds)
@@ -227,7 +295,8 @@ class Agent:
             return None
 
         started = time.monotonic()
-        reply = answer(self.client, self.system_prompt, question, self.model, self.effort)
+        reply = answer(self.client, self.system_prompt, question, self.model, self.effort,
+                       self.tools, self.run_tool)
         log.info("Turn %d: %s %.2f s -> %r", self.turn, self.model, time.monotonic() - started, reply)
         if not reply:
             log.info("Turn %d: empty answer, nothing to say", self.turn)
@@ -249,6 +318,29 @@ def setup_logging(log_path):
     log.setLevel(logging.INFO)
 
 
+def start_phone(public_url, http_port):
+    """Loads contacts and Telnyx settings and starts the webhook/audio server for calls."""
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from phone_call import PhoneServer, TelnyxCalls
+    from telnyx_call import phone_number
+    values = {key: os.environ.get(key, "").strip()
+              for key in ("TELNYX_API_KEY", "TELNYX_CONNECTION_ID", "TELNYX_FROM_NUMBER")}
+    missing = [key for key, value in values.items() if not value]
+    if missing:
+        raise SystemExit("Phone calls need in .env: " + ", ".join(missing))
+    if not CONTACTS_PATH.exists():
+        raise SystemExit("Phone calls need contacts.json (see contacts.example.json)")
+    contacts = load_contacts()
+    public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(PUBLIC_KEY_PATH.read_text().strip()))
+    calls = TelnyxCalls(values["TELNYX_API_KEY"], values["TELNYX_CONNECTION_ID"],
+                        phone_number(values["TELNYX_FROM_NUMBER"]))
+    phone = PhoneServer(calls, public_url, public_key, http_port)
+    log.info("Phone calls enabled for %d contact(s): %s (events/audio on port %d)",
+             len(contacts), ", ".join(contacts), http_port)
+    return phone, contacts
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", help="ESP32 serial port")
@@ -256,6 +348,9 @@ def main():
     parser.add_argument("--effort", default=REASONING_EFFORT,
                         choices=["minimal", "low", "medium", "high", "xhigh", "max"], help="reasoning effort")
     parser.add_argument("--voice-id", default=DEFAULT_VOICE_ID, help="Cartesia voice ID")
+    parser.add_argument("--public-url", help="enable phone calls: public HTTPS URL (e.g. ngrok) "
+                                             "forwarding to --http-port")
+    parser.add_argument("--http-port", type=int, default=8766, help="local port for Telnyx events and audio")
     args = parser.parse_args()
 
     load_dotenv(ROOT / ".env")
@@ -268,7 +363,11 @@ def main():
     turn_dir = LOG_DIR / f"voice-agent-{started}"
     turn_dir.mkdir(parents=True, exist_ok=True)
     setup_logging(LOG_DIR / f"voice-agent-{started}.log")
-    agent = Agent(meta_key, cartesia_key, args.voice_id, SYSTEM_PROMPT_PATH.read_text().strip(), turn_dir, args.model, args.effort)
+    contacts, phone = {}, None
+    if args.public_url:
+        phone, contacts = start_phone(args.public_url, args.http_port)
+    agent = Agent(meta_key, cartesia_key, args.voice_id, SYSTEM_PROMPT_PATH.read_text().strip(), turn_dir,
+                  args.model, args.effort, contacts)
     log.info("Models: %s, %s (effort %s), %s (voice %s)", TRANSCRIBE_MODEL, args.model, args.effort,
              TTS_MODEL, args.voice_id)
     log.info("Audio files for each turn: %s", turn_dir.relative_to(ROOT))
@@ -289,6 +388,16 @@ def main():
                 started_play = time.monotonic()
                 link.play(speech)
                 log.info("Turn %d: played answer in %.1f s", agent.turn, time.monotonic() - started_play)
+            if agent.pending_call and phone:
+                name, number = agent.pending_call
+                agent.pending_call = None
+                log.info("Turn %d: calling %s", agent.turn, name)
+                outcome = phone.call(link, number)
+                log.info("Turn %d: call outcome %s", agent.turn, outcome)
+                try:
+                    link.play(agent.say(CALL_OUTCOMES[outcome or "failed"].format(name=name)))
+                except Exception as error:
+                    log.error("Could not announce the call outcome: %s", error)
     except KeyboardInterrupt:
         log.info("Stopped")
     finally:

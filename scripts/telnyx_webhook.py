@@ -20,9 +20,10 @@ MAX_EVENT_IDS = 1024
 
 
 class EventReceiver:
-    def __init__(self, public_key, clock=time.time):
+    def __init__(self, public_key, clock=time.time, on_event=None):
         self.public_key = public_key
         self.clock = clock
+        self.on_event = on_event  # called with (event_type, payload) for each new signed event
         self.lock = threading.Lock()
         self.seen = set()
         self.order = deque()
@@ -66,6 +67,8 @@ class EventReceiver:
             if isinstance(value, str):
                 record[field] = value[:512]
         print(json.dumps(record, ensure_ascii=True), flush=True)
+        if self.on_event:
+            self.on_event(event_type, payload)
         return 200, {"received": True}
 
 

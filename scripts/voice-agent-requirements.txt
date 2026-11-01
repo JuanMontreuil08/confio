@@ -2,3 +2,4 @@ openai
 python-dotenv
 pyserial>=3.5,<4
 requests
+aiohttp>=3.9

@@ -78,6 +78,7 @@ class VoiceAgentTests(unittest.TestCase):
         agent.turn_dir, agent.turn = self.dir, 0
         agent.model = voice_agent.CHAT_MODEL
         agent.effort = voice_agent.REASONING_EFFORT
+        agent.contacts, agent.tools, agent.pending_call = {}, voice_agent.TOOLS, None
         return agent
 
     def test_full_turn_calls_each_service_and_saves_audio(self):

@@ -1,7 +1,9 @@
 """Laptop side of the esp32/voice serial protocol.
 
-ESP32 -> laptop frames ("MIC1"): S start, D voice PCM, F finish, A played, I info, E error.
-Laptop -> ESP32 frames ("SPK1"): P mono PCM to play, E end of playback.
+ESP32 -> laptop frames ("MIC1"): S start, D voice PCM, F finish, A played, I info, E error,
+H hang-up button pressed, M call-mode voice (mono PCM).
+Laptop -> ESP32 frames ("SPK1"): P mono PCM to play, E end of playback,
+C call mode on (mic streams continuously), N call mode off.
 Every frame is: 4-byte magic, 1-byte type, little-endian uint32 length, payload.
 """
 import struct
@@ -15,7 +17,7 @@ SAMPLE_RATE = 16000
 HEADER = struct.Struct("<4sBI")
 MIC_MAGIC = b"MIC1"
 SPEAKER_MAGIC = b"SPK1"
-MIC_TYPES = b"SDFAIE"
+MIC_TYPES = b"SDFAIEHM"
 MAX_MIC_PAYLOAD = 1024
 PLAY_CHUNK_BYTES = 1024  # 512 mono samples, the firmware maximum
 WINDOW = 8  # frames in flight; 8 KiB stays well under the 16 KiB serial buffer
@@ -130,3 +132,22 @@ class VoiceLink:
                 acknowledged += 1
             elif kind == "I" and payload == READY_MESSAGE:
                 raise RuntimeError("The ESP32 restarted during playback")
+
+    def call_mode(self, on):
+        """In call mode the mic streams continuously and playback is a live stream."""
+        if not on:
+            self.device.write(pack("E"))  # flush the speaker and clear the playing flag
+        self.device.write(pack("C" if on else "N"))
+
+    def stream(self, mono_pcm):
+        """Queues live audio for the speaker without waiting for acknowledgements."""
+        mono_pcm = mono_pcm[:len(mono_pcm) - len(mono_pcm) % 2]
+        for i in range(0, len(mono_pcm), PLAY_CHUNK_BYTES):
+            self.device.write(pack("P", mono_pcm[i:i + PLAY_CHUNK_BYTES]))
+
+    def poll(self, timeout=0.02):
+        """Returns the next frame, or None if nothing arrives within the timeout."""
+        try:
+            return self.next_frame(timeout=timeout)
+        except TimeoutError:
+            return None
