@@ -19,11 +19,16 @@ from PIL import Image, UnidentifiedImageError
 
 log = logging.getLogger("voice_agent")
 RESTORE_PROMPT = (
-    "Restore this photograph conservatively. Reduce horizontal sensor banding and noise, "
-    "correct exposure and white balance, and improve natural clarity. Preserve the exact "
-    "scene, composition, people, objects, colors, text and button labels. Do not add, remove "
-    "or invent details. Do not stylize, reframe or replace the scene."
+    "This photo was taken with a small low-resolution ESP32 camera. It may have a strong green or yellow "
+    "color cast, horizontal line artifacts, noise and blur. Recreate it as the same moment photographed with "
+    "a modern high-resolution smartphone: remove the color cast and line artifacts, use natural true-to-life "
+    "colors and balanced exposure, and render sharp, clean detail. Keep the same scene, framing, people, poses, "
+    "objects and text. Do not add or remove anything, and do not apply artistic styles or filters."
 )
+# Chosen in a side-by-side test: low effort without tools was faster (7.5 s vs 15.7 s)
+# and kept the face closer to the original than high effort, which invented details.
+RESTORE_OPTIONS = {"reasoning_strength": "low", "tool_enablement": {
+    "enable_image_search": False, "enable_web_search": False, "enable_shell": False}}
 PHOTO_ENV = ("CAMERA_URL", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "SUPABASE_STORAGE_BUCKET",
              "TELNYX_API_KEY", "TELNYX_MESSAGING_PROFILE_ID", "TELNYX_SMS_SENDER")
 
@@ -130,7 +135,8 @@ class PhotoTools:
         (folder / "original.jpg").write_bytes(original)
         started = time.monotonic()
         result = self.image_client.images.edit(model="muse-image-1.0", prompt=RESTORE_PROMPT,
-                    image=("original.jpg", original, "image/jpeg"), n=1, response_format="b64_json")
+                    image=("original.jpg", original, "image/jpeg"), n=1, response_format="b64_json",
+                    extra_body=RESTORE_OPTIONS)
         if not result.data or not result.data[0].b64_json:
             raise ValueError("Muse Image returned no image")
         restored = jpeg(base64.b64decode(result.data[0].b64_json, validate=True))

@@ -100,6 +100,7 @@ class PhotoTests(unittest.TestCase):
         self.assertNotIn("media_urls", payload)
         self.assertIn("https://example.supabase.co/storage/v1/object/sign/", payload["text"])
         self.assertEqual(self.edits[0]["model"], "muse-image-1.0")
+        self.assertEqual(self.edits[0]["extra_body"]["reasoning_strength"], "low")
         self.assertTrue((Path(self.temp.name) / photo_id / "original.jpg").exists())
         self.assertTrue((Path(self.temp.name) / photo_id / "restored.jpg").exists())
         self.assertEqual(self.http.calls[3][2]["headers"]["apikey"], "sb_secret_fake")
