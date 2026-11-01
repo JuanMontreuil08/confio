@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -83,8 +84,14 @@ TOOLS = [{
     "description": "Return the current local date, time and day of the week where the user lives. "
                    "Use it for any question about today's date, the day of the week or the time.",
     "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+}, {
+    # Built-in Meta tool: the server runs the search; the model decides when to use it.
+    "type": "web_search",
+    "search_context_size": "medium",
 }]
 MAX_TOOL_ROUNDS = 3
+MAX_SEARCHES = 2  # max_tool_calls counts built-in tool calls (web searches) per request
+MAX_LOGGED_RESULTS = 5
 REASONING_EFFORT = "medium"  # Spark rejects "none"; "low" is faster for direct answers
 
 
@@ -101,6 +108,48 @@ def run_tool(name, arguments):
     return TOOL_FUNCTIONS[name]()
 
 
+def field(obj, name):
+    """Reads a field from an SDK object or a plain dict (older SDKs leave unknown parts as dicts)."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
+def log_searches(response):
+    """Logs each web search query and its top results, so answers can be checked later.
+
+    Meta returns url_citation annotations rarely; the opt-in web_search_call.results
+    list (title and URL of every page the model considered) is the reliable source list.
+    """
+    for item in response.output:
+        if item.type == "web_search_call":
+            action = field(item, "action") or {}  # search (query), open_page or find_in_page (url)
+            log.info("Web %s: %r", field(action, "type") or "search",
+                     field(action, "query") or field(action, "url") or "")
+            for result in (field(item, "results") or [])[:MAX_LOGGED_RESULTS]:
+                log.info("  result: %s <%s>", field(result, "title"), field(result, "url"))
+        elif item.type == "message":
+            for block in getattr(item, "content", None) or []:
+                for note in getattr(block, "annotations", None) or []:
+                    if getattr(note, "type", "") == "url_citation":
+                        log.info("  cited: %s <%s>", getattr(note, "title", ""), getattr(note, "url", ""))
+
+
+def final_text(response):
+    """Joins the answer messages, skipping "commentary" preambles such as "Voy a buscar..."."""
+    texts = [block.text for item in response.output
+             if item.type == "message" and getattr(item, "phase", None) != "commentary"
+             for block in getattr(item, "content", None) or [] if getattr(block, "type", "") == "output_text"]
+    return " ".join(texts) if texts else (response.output_text or "")
+
+
+def spoken(text):
+    """Removes links, URLs, citation marks and markdown that would be read aloud literally."""
+    text = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", text)  # [title](url) -> title
+    text = re.sub(r"\(?https?://[^\s)]*[^\s).,;:!?]\)?", "", text)  # keep sentence punctuation
+    text = re.sub(r"【[^】]*】|\[\d+\]", "", text)
+    text = re.sub(r"[*_#`]+", "", text)
+    return re.sub(r"\s+([.,;:!?])", r"\1", re.sub(r"\s{2,}", " ", text)).strip()
+
+
 def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_EFFORT):
     """Asks the Meta model (Responses API) for a short spoken answer, running any tools it requests.
 
@@ -113,10 +162,12 @@ def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_E
     for round_number in range(MAX_TOOL_ROUNDS + 1):
         response = client.responses.create(
             model=model, input=history, tools=TOOLS, reasoning={"effort": effort},
-            store=False, include=["reasoning.encrypted_content"])
+            store=False, include=["reasoning.encrypted_content", "web_search_call.results"],
+            extra_body={"max_tool_calls": MAX_SEARCHES})  # older SDKs lack this argument
+        log_searches(response)
         calls = [item for item in response.output if item.type == "function_call"]
         if not calls:
-            return (response.output_text or "").strip()
+            return spoken(final_text(response))
         if round_number == MAX_TOOL_ROUNDS:
             raise RuntimeError(f"Model still requesting tools after {MAX_TOOL_ROUNDS} rounds")
         history += [item.model_dump(exclude_none=True) for item in response.output]

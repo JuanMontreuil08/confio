@@ -101,9 +101,11 @@ class VoiceAgentTests(unittest.TestCase):
         self.assertEqual(chat["input"], [{"role": "system", "content": "system-test"},
                                          {"role": "user", "content": "¿Qué hora es?"}])
         self.assertEqual(chat["tools"][0]["name"], "get_current_datetime")
+        self.assertEqual(chat["tools"][1], {"type": "web_search", "search_context_size": "medium"})
+        self.assertEqual(chat["extra_body"]["max_tool_calls"], 2)
         self.assertEqual(chat["reasoning"], {"effort": "medium"})
         self.assertIs(chat["store"], False)
-        self.assertEqual(chat["include"], ["reasoning.encrypted_content"])
+        self.assertEqual(chat["include"], ["reasoning.encrypted_content", "web_search_call.results"])
 
         url, kwargs = session.calls[1]
         self.assertEqual(url, voice_agent.CARTESIA_URL)
@@ -131,6 +133,28 @@ class VoiceAgentTests(unittest.TestCase):
                          ["system", "user", "function_call", "function_call_output"])
         self.assertEqual(history[3]["call_id"], "call_1")
         self.assertIn("weekday", json.loads(history[3]["output"]))
+
+    def test_web_search_answer_logs_sources_and_skips_commentary(self):
+        def message(text, phase=None):
+            block = types.SimpleNamespace(type="output_text", text=text, annotations=[])
+            return types.SimpleNamespace(type="message", phase=phase, content=[block])
+        result = {"title": "RadiologyInfo", "url": "https://radiologyinfo.org/x"}  # SDK leaves these as dicts
+        search = types.SimpleNamespace(type="web_search_call", results=[result],
+                                       action={"query": "histerosonografía"})
+        output = [message("Voy a buscarlo.", "commentary"), search,
+                  message("Según **RadiologyInfo**, es una ecografía [RadiologyInfo](https://radiologyinfo.org/x).")]
+        client, calls = fake_client(types.SimpleNamespace(id="r", output=output, output_text="ignored"))
+        with self.assertLogs("voice_agent", "INFO") as logs:
+            reply = voice_agent.answer(client, "system", "¿Qué es una histerosonografía?")
+        self.assertEqual(reply, "Según RadiologyInfo, es una ecografía RadiologyInfo.")
+        self.assertEqual(len(calls), 1)  # the server runs the search; no second request
+        self.assertIn("web_search_call.results", calls[0]["include"])
+        joined = "\n".join(logs.output)
+        self.assertIn("Web search: 'histerosonografía'", joined)
+        self.assertIn("result: RadiologyInfo <https://radiologyinfo.org/x>", joined)
+
+    def test_spoken_removes_urls_and_citation_marks(self):
+        self.assertEqual(voice_agent.spoken("Vea https://a.pe/b. Listo【3†fuente】 [2]"), "Vea. Listo")
 
     def test_bad_tool_requests_return_errors_to_the_model(self):
         self.assertIn("error", voice_agent.run_tool("delete_everything", "{}"))
