@@ -107,6 +107,7 @@ class VoiceLink:
         """Waits for one button press and returns the voice as mono 16 kHz PCM."""
         while self.next_frame()[0] != "S":
             pass
+        self.record_started_at = time.monotonic()
         self.log("Recording...")
         stereo = bytearray()
         while True:

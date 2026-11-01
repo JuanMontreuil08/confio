@@ -6,6 +6,13 @@ Confio is being built for the **Meta Global AI Developer Hackathon** (submission
 
 > **Status:** early, work in progress. This README describes the project at a high level. Details will change as we build step by step.
 
+## Voice photo sharing
+
+The current photo flow is: ask by voice, aim the separately powered ESP32-CAM,
+say when ready, restore with Muse Image, save to Supabase Storage and send the
+link by Telnyx SMS to a saved contact. See [setup and testing](scripts/PHOTOS.md).
+The original object-finding roadmap below remains historical context.
+
 ## The idea
 
 Many older adults find smartphones confusing, but they can still benefit from an AI assistant. Confio puts that assistant behind a handheld device with a few large buttons. The user presses a button, asks a question out loud in Spanish, and gets a spoken answer.
