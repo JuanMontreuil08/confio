@@ -1,0 +1,5 @@
+.pio/
+.vscode/
+__pycache__/
+data/voice.pcm
+include/audio_info.h
