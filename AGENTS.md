@@ -71,6 +71,14 @@ This file describes the **first target flow only**, at a high level. Details wil
 - The user authorized this isolated local microphone capture; it is not integrated with calls, transcription, summaries or a database. Preserve the working capture behavior. Temporary diagnostics and earlier failed microphone WAVs were removed; only the final sample is retained. See `esp32/mic/README.md`.
 - Earlier SCK contacts and trials on WS 19 / SD 21 produced zeros or corrupted audio. The final wiring works, but testing did not prove any ESP32 GPIO is damaged. Do not present the hardware cause as confirmed.
 
+## MAX98357A speaker playback
+
+- `esp32/speaker/` is a separate standalone playback project. It embeds channel 1 of the retained `media/output/voice-20261031-194442-058191.wav` as 16 kHz, 16-bit PCM; no additional sample files should be committed. Generated PCM/header and build artifacts are ignored.
+- The user confirmed playback through the MAX98357A and 8-ohm, 3 W speaker at 80% PCM amplitude. Final wiring: BCLK to RX2/GPIO 16, LRC to TX2/GPIO 17, DIN to D19/GPIO 19; VIN directly to USB-fed ESP32 VIN (measured about 4.6 V), GND to common ground. SD and GAIN are unconnected on this breakout. Speaker purple (+) and gray (-) go only to amp outputs, never ESP32 GND.
+- The VIN jumper was intermittent: pressing it restored sound. A firm physical power connection remains necessary; normal I2S logs cannot establish audible output. Do not describe the connector as permanently repaired.
+- After uploading, playback starts automatically and repeats after five seconds of silence. USB supplies power only, and unplugging it stops the test. Uploading speaker firmware temporarily replaces mic/button firmware; it does not change mic wiring/source. Stop serial processes before uploading. See `esp32/speaker/README.md` for build, upload and mic-restore commands.
+- Telnyx audio forwarding, WiFi streaming, Cartesia TTS and the agent are not integrated into this playback test. The user's final goal is a WiFi device powered by USB with cloud services, without a user laptop. Notify the user before writing Telnyx integration code.
+
 ## Guidelines
 - Keep it simple and demo-first.
 - User-facing language is Spanish; code and docs are in English.

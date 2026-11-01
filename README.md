@@ -50,6 +50,14 @@ validated on hardware. Hold the button to record and release it to save a local
 WAV. The working signal pins are SCK 18, WS 5 and SD 22, with the button on 23.
 This capture is not yet connected to speech recognition or the call agent.
 
+## MAX98357A speaker playback
+
+[`esp32/speaker/`](esp32/speaker/README.md) embeds the retained voice WAV and
+plays it through the MAX98357A and 8-ohm, 3 W speaker. Hardware playback was
+confirmed at 80% PCM amplitude with BCLK 16, LRC 17 and DIN 19. After upload,
+USB supplies power only; unplug it to stop the repeating sample. This standalone
+firmware replaces microphone capture until that project's firmware is restored.
+
 ## Principles
 
 - Keep it simple and demo-first.
