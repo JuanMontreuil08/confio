@@ -10,6 +10,7 @@ constexpr int kMicClockPin = 18;
 constexpr int kMicWordSelectPin = 5;
 constexpr int kMicDataPin = 22;
 constexpr int kButtonPin = 23;
+constexpr int kHangupPin = 4; // second button: hang up a live call (to GND, internal pull-up)
 
 // Speaker (validated in esp32/speaker).
 constexpr i2s_port_t kSpeakerPort = I2S_NUM_1;
@@ -25,8 +26,11 @@ constexpr size_t kMicSamples = 256;
 constexpr size_t kMaxPlayBytes = 1024; // 512 mono samples per playback frame
 
 // Frames: 4-byte magic, 1-byte type, little-endian uint32 length, payload.
-// ESP32 -> laptop uses "MIC1": S start, D voice, F finish, A played, I info, E error.
-// Laptop -> ESP32 uses "SPK1": P mono PCM to play, E end of playback.
+// ESP32 -> laptop uses "MIC1": S start, D voice, F finish, A played, I info, E error,
+// H hang-up button pressed (the laptop ignores it when no call is live),
+// M call-mode voice (mono channel 1 only, half the serial traffic of D).
+// Laptop -> ESP32 uses "SPK1": P mono PCM to play, E end of playback,
+// C call mode on (mic streams continuously, button 1 ignored), N call mode off.
 constexpr uint8_t kSpeakerMagic[] = {'S', 'P', 'K', '1'};
 constexpr size_t kHeaderSize = 9;
 
@@ -128,6 +132,7 @@ void finishPlayback() {
 }
 
 bool playing = false;
+bool callMode = false;
 
 // Reads laptop frames byte by byte; returns after handling at most one frame.
 void pollPlayback() {
@@ -150,7 +155,8 @@ void pollPlayback() {
       if (headerFill < kHeaderSize) continue;
       payloadLength = header[5] | header[6] << 8 | header[7] << 16 | static_cast<uint32_t>(header[8]) << 24;
       const uint8_t type = header[4];
-      if ((type != 'P' && type != 'E') || payloadLength > kMaxPlayBytes || payloadLength % 2) {
+      if ((type != 'P' && type != 'E' && type != 'C' && type != 'N') || payloadLength > kMaxPlayBytes ||
+          payloadLength % 2) {
         headerFill = 0; // corrupt header: look for the next marker
         continue;
       }
@@ -167,10 +173,15 @@ void pollPlayback() {
       playing = true;
       playMono(payload, payloadLength);
       sendFrame('A'); // one acknowledgement per played frame paces the laptop
-    } else {
+    } else if (type == 'E') {
       finishPlayback();
       playing = false;
       sendFrame('A');
+    } else {
+      // During a call the phone audio arrives as a continuous stream of P frames.
+      callMode = type == 'C';
+      if (callMode) i2s_zero_dma_buffer(kMicPort);
+      sendText('I', callMode ? "Call mode on" : "Call mode off");
     }
     return;
   }
@@ -191,7 +202,9 @@ void pollMicrophone() {
   }
   if (reading != stableState && millis() - changedAt >= kDebounceMs) {
     stableState = reading;
-    if (stableState == LOW && !playing) {
+    if (callMode) {
+      recording = false; // button 1 does nothing during a call
+    } else if (stableState == LOW && !playing) {
       // The button is ignored while the agent speaks.
       i2s_zero_dma_buffer(kMicPort);
       recording = true;
@@ -201,22 +214,48 @@ void pollMicrophone() {
       sendFrame('F');
     }
   }
-  if (!recording) return;
+  if (!recording && !callMode) return;
 
-  size_t bytesRead = 0;
-  if (i2s_read(kMicPort, raw, sizeof(raw), &bytesRead, pdMS_TO_TICKS(30)) != ESP_OK) return;
-  const size_t count = bytesRead / sizeof(raw[0]);
-  for (size_t i = 0; i < count; ++i) {
-    const int32_t sample = raw[i] >> 16;
-    pcm[i] = static_cast<int16_t>(constrain(sample, -32768, 32767));
+  // In a call, playback writes block the loop for up to ~32 ms, so drain every
+  // buffered mic block (8 ms each, 128 ms of DMA) instead of reading only one.
+  for (int block = 0; block < (callMode ? 16 : 1); ++block) {
+    size_t bytesRead = 0;
+    if (i2s_read(kMicPort, raw, sizeof(raw), &bytesRead, callMode ? 0 : pdMS_TO_TICKS(30)) != ESP_OK) return;
+    const size_t count = bytesRead / sizeof(raw[0]);
+    if (!count) return;
+    // In call mode keep only channel 1 (even slots); the second slot is silent.
+    const size_t step = callMode ? 2 : 1;
+    size_t out = 0;
+    for (size_t i = 0; i < count; i += step) {
+      const int32_t sample = raw[i] >> 16;
+      pcm[out++] = static_cast<int16_t>(constrain(sample, -32768, 32767));
+    }
+    sendFrame(callMode ? 'M' : 'D', reinterpret_cast<const uint8_t *>(pcm), out * sizeof(pcm[0]));
   }
-  if (count) sendFrame('D', reinterpret_cast<const uint8_t *>(pcm), count * sizeof(pcm[0]));
+}
+
+// Reports each press of the hang-up button; the laptop decides whether a call is live.
+void pollHangup() {
+  static bool previousReading = HIGH;
+  static bool stableState = HIGH;
+  static unsigned long changedAt = 0;
+  const bool reading = digitalRead(kHangupPin);
+  if (reading != previousReading) {
+    changedAt = millis();
+    previousReading = reading;
+  }
+  if (reading != stableState && millis() - changedAt >= kDebounceMs) {
+    stableState = reading;
+    if (stableState == LOW) sendFrame('H');
+  }
 }
 
 void setup() {
   Serial.setRxBufferSize(16384); // must be set before begin()
+  Serial.setTxBufferSize(4096);  // keeps call-mode mic frames from blocking the loop
   Serial.begin(kBaudRate);
   pinMode(kButtonPin, INPUT_PULLUP);
+  pinMode(kHangupPin, INPUT_PULLUP);
   setupMicrophone();
 #ifndef SKIP_SPEAKER
   setupSpeaker();
@@ -239,5 +278,6 @@ void setup() {
 void loop() {
   pollPlayback();
   pollMicrophone();
+  pollHangup();
   if (!playing) delay(1);
 }

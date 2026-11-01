@@ -6,3 +6,4 @@ __pycache__/
 .telnyx-webrtc.json
 .telnyx-webrtc.tmp
 logs/
+contacts.json
