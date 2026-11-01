@@ -43,6 +43,13 @@ Many older adults find smartphones confusing, but they can still benefit from an
 3. Move the microphone and speaker onto the gadget (INMP441 + MAX98357).
 4. Later: the *Llamar* and *Investigar* buttons.
 
+## INMP441 microphone capture
+
+The standalone microphone capture in [`esp32/mic/`](esp32/mic/README.md) is
+validated on hardware. Hold the button to record and release it to save a local
+WAV. The working signal pins are SCK 18, WS 5 and SD 22, with the button on 23.
+This capture is not yet connected to speech recognition or the call agent.
+
 ## Principles
 
 - Keep it simple and demo-first.

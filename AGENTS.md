@@ -64,6 +64,13 @@ This file describes the **first target flow only**, at a high level. Details wil
 - The repository is public. Never commit the real test destination or credentials. Live mode requires the destination through `--to`; documentation/tests use example digits. The next feature is voice request → Meta speech-to-text → Muse Spark → call tool. Moving microphone and speaker to the gadget comes later after soldering. Do not add recording, summaries or a database now.
 - Before writing Telnyx integration code, notify the user. Preserve the current idle UI. The requested future active layout moves the call card to the upper-left, shows minimal English debug logs for transcription, model requests, tool execution and provider events, and drives the waveform from the remote caller's real audio. No recording, summaries or database in the current scope.
 
+## INMP441 microphone capture
+
+- `esp32/mic/` is a standalone push-to-talk capture. The user confirmed clear voice with direct female-to-female signal connections: SCK GPIO 18, WS GPIO 5, SD GPIO 22. VDD goes to 3V3; GND and L/R go to GND. The button uses GPIO 23 with an internal pull-up. Preserve this validated mapping.
+- Run `python3 esp32/mic/record.py --port /dev/cu.usbserial-0001` from the repository root (adjust the port as needed). Hold the button to record and release to save a stereo 16 kHz, 16-bit PCM WAV under `media/output/`. Channel 1 contains voice; channel 2 is effectively silent. USB serial runs at 921600 baud. Stop the receiver and serial monitors before firmware upload.
+- The user authorized this isolated local microphone capture; it is not integrated with calls, transcription, summaries or a database. Preserve the working capture behavior. Temporary diagnostics and earlier failed microphone WAVs were removed; only the final sample is retained. See `esp32/mic/README.md`.
+- Earlier SCK contacts and trials on WS 19 / SD 21 produced zeros or corrupted audio. The final wiring works, but testing did not prove any ESP32 GPIO is damaged. Do not present the hardware cause as confirmed.
+
 ## Guidelines
 - Keep it simple and demo-first.
 - User-facing language is Spanish; code and docs are in English.
