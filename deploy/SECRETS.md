@@ -44,4 +44,5 @@ Set repository Actions variable `CONFIO_DEPLOY_ENABLED` to `true` only after
 the tokens are configured. Until then, pushes run checks without attempting a deploy.
 Use a dedicated deployment token with an appropriate lifetime; expiration only
 disables future CI/CD deployments, not an already-running gateway.
-The workflow deploys this branch only; it does not deploy unrelated pushes to main.
+The workflow deploys relevant pushes to `main` after checks pass; pull requests
+only run validation. Manual runs deploy only when launched against `main`.

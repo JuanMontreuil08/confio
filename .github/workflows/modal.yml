@@ -1,7 +1,7 @@
 name: Confio Modal
 on:
   push:
-    branches: [codex/modal-wifi]
+    branches: [main]
     paths:
       - 'scripts/**'
       - 'prompts/**'
@@ -49,7 +49,7 @@ jobs:
           PLATFORMIO_BUILD_FLAGS: -DCONFIO_WIFI -DCONFIO_TEST_CONFIG
       # Never publish binaries: real builds contain private WiFi/device credentials.
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/codex/modal-wifi' && vars.CONFIO_DEPLOY_ENABLED == 'true'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.CONFIO_DEPLOY_ENABLED == 'true'
     needs: [check, firmware]
     runs-on: ubuntu-latest
     environment: modal

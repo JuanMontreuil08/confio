@@ -89,7 +89,7 @@ speaker projects remain untouched.
 
 [The workflow](../.github/workflows/modal.yml) checks Python/Node regressions
 and compiles both WiFi firmwares with example credentials. It deploys only
-pushes to `codex/modal-wifi`, after checks pass. Configure the GitHub Actions
+pushes to `main`, after checks pass. Configure the GitHub Actions
 secrets/variable in [SECRETS.md](SECRETS.md). PRs run checks without deployment
 credentials. Never publish real firmware binaries: they embed WiFi/device tokens.
 
