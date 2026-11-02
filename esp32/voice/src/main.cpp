@@ -3,6 +3,9 @@
 // Reuses the validated wiring and I2S settings of esp32/mic and esp32/speaker.
 #include <Arduino.h>
 #include <driver/i2s.h>
+#ifdef CONFIO_WIFI
+#include <WiFi.h>
+#endif
 
 // Microphone (validated in esp32/mic).
 constexpr i2s_port_t kMicPort = I2S_NUM_0;
@@ -34,7 +37,17 @@ constexpr size_t kMaxPlayBytes = 1024; // 512 mono samples per playback frame
 constexpr uint8_t kSpeakerMagic[] = {'S', 'P', 'K', '1'};
 constexpr size_t kHeaderSize = 9;
 
+#ifdef CONFIO_WIFI
+void wifiSendFrame(uint8_t type, const uint8_t *data, uint32_t length);
+void wifiPollPlayback();
+extern bool wifiBusy;
+extern bool wifiOnline;
+#endif
+
 void sendFrame(uint8_t type, const uint8_t *data = nullptr, uint32_t length = 0) {
+#ifdef CONFIO_WIFI
+  wifiSendFrame(type, data, length);
+#else
   const uint8_t header[kHeaderSize] = {'M', 'I', 'C', '1', type,
                                        static_cast<uint8_t>(length),
                                        static_cast<uint8_t>(length >> 8),
@@ -42,9 +55,14 @@ void sendFrame(uint8_t type, const uint8_t *data = nullptr, uint32_t length = 0)
                                        static_cast<uint8_t>(length >> 24)};
   Serial.write(header, sizeof(header));
   if (length) Serial.write(data, length);
+#endif
 }
 
 void sendText(uint8_t type, const char *text) {
+#ifdef CONFIO_WIFI
+  // Keep boot mic diagnostics visible even before WiFi/TLS connects.
+  Serial.println(text);
+#endif
   sendFrame(type, reinterpret_cast<const uint8_t *>(text), strlen(text));
 }
 
@@ -133,9 +151,13 @@ void finishPlayback() {
 
 bool playing = false;
 bool callMode = false;
+bool recording = false;
 
 // Reads laptop frames byte by byte; returns after handling at most one frame.
 void pollPlayback() {
+#ifdef CONFIO_WIFI
+  wifiPollPlayback();
+#else
   static uint8_t header[kHeaderSize];
   static uint8_t payload[kMaxPlayBytes];
   static size_t headerFill = 0;
@@ -185,12 +207,15 @@ void pollPlayback() {
     }
     return;
   }
+#endif
 }
 
 void pollMicrophone() {
+#ifdef CONFIO_WIFI
+  if (!wifiOnline) return;
+#endif
   static bool previousReading = HIGH;
   static bool stableState = HIGH;
-  static bool recording = false;
   static unsigned long changedAt = 0;
   static int32_t raw[kMicSamples];
   static int16_t pcm[kMicSamples];
@@ -204,7 +229,11 @@ void pollMicrophone() {
     stableState = reading;
     if (callMode) {
       recording = false; // button 1 does nothing during a call
-    } else if (stableState == LOW && !playing) {
+    } else if (stableState == LOW && !playing
+#ifdef CONFIO_WIFI
+               && !wifiBusy
+#endif
+    ) {
       // The button is ignored while the agent speaks.
       i2s_zero_dma_buffer(kMicPort);
       recording = true;
@@ -250,6 +279,10 @@ void pollHangup() {
   }
 }
 
+#ifdef CONFIO_WIFI
+#include "wifi_transport.h"
+#endif
+
 void setup() {
   Serial.setRxBufferSize(16384); // must be set before begin()
   Serial.setTxBufferSize(4096);  // keeps call-mode mic frames from blocking the loop
@@ -273,6 +306,9 @@ void setup() {
     sendText('I', text);
   }
   sendText('I', "Voice loop ready");
+#ifdef CONFIO_WIFI
+  wifiSetup();
+#endif
 }
 
 void loop() {

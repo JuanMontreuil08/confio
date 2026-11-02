@@ -6,6 +6,14 @@ Confio is being built for the **Meta Global AI Developer Hackathon** (submission
 
 > **Status:** early, work in progress. This README describes the project at a high level. Details will change as we build step by step.
 
+## WiFi device and Modal deployment
+
+The `codex/modal-wifi` branch moves the existing voice agent and all its tools to
+Modal. The voice board and handheld camera connect over authenticated WiFi;
+buttons, wiring and the spoken interaction stay the same. Supabase remains the
+photo store. The original USB/local firmware targets remain available.
+See [deployment, firmware and CI/CD](deploy/README.md).
+
 ## Voice photo sharing
 
 The current photo flow is: ask by voice, aim the separately powered ESP32-CAM,

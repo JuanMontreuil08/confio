@@ -7,3 +7,8 @@ __pycache__/
 .telnyx-webrtc.tmp
 logs/
 contacts.json
+.venv-modal/
+esp32/voice/include/wifi_credentials.h
+esp32/voice/include/cloud_config.h
+esp32/camera/include/cloud_config.h
+.modal-local/

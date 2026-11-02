@@ -1,0 +1,73 @@
+name: Confio Modal
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'prompts/**'
+      - 'esp32/**'
+      - 'deploy/**'
+      - '.github/workflows/modal.yml'
+  pull_request:
+    paths: ['scripts/**', 'prompts/**', 'esp32/**', 'deploy/**', '.github/workflows/modal.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: confio-modal-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: deploy/*requirements.txt
+      - run: python -m pip install -r deploy/requirements.txt -r scripts/call-requirements.txt -r scripts/telnyx-requirements.txt
+      - run: python -m unittest discover -s scripts/tests -q
+      - run: node --test scripts/tests/test_browser_call.mjs
+  firmware:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - project: voice
+            target: esp32wifi
+          - project: camera
+            target: esp32camwifi
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install platformio==6.1.18
+      - run: pio run -d esp32/${{ matrix.project }} -e ${{ matrix.target }}
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DCONFIO_WIFI -DCONFIO_TEST_CONFIG
+      # Never publish binaries: real builds contain private WiFi/device credentials.
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.CONFIO_DEPLOY_ENABLED == 'true'
+    needs: [check, firmware]
+    runs-on: ubuntu-latest
+    environment: modal
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      CONFIO_ADMIN_TOKEN: ${{ secrets.CONFIO_ADMIN_TOKEN }}
+      CONFIO_PUBLIC_URL: ${{ vars.CONFIO_PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r deploy/tooling-requirements.txt
+      - name: Wait until the device is idle
+        if: env.CONFIO_PUBLIC_URL != ''
+        run: python scripts/modal_deploy_guard.py
+      - run: python -m modal deploy deploy/modal_app.py
+      - name: Resume after deployment, or undo drain if deployment failed
+        if: always() && env.CONFIO_PUBLIC_URL != ''
+        run: python scripts/modal_deploy_guard.py --resume

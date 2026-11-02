@@ -10,12 +10,14 @@ voice and the spoken answer saved as WAV files next to it. Conversation context
 stays in RAM until five minutes of idle waiting have elapsed.
 """
 import argparse
+import array
 import io
 import json
 import logging
 import os
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import sys
 import time
@@ -77,8 +79,9 @@ def transcribe(session, api_key, wav_bytes):
 
 
 def get_current_datetime(now=None):
-    """The model has no clock; this tool reads the laptop's local date and time."""
-    now = now or datetime.now().astimezone()
+    """Read the configured user timezone, or local laptop time in USB mode."""
+    now = now or (datetime.now(ZoneInfo(os.environ["CONFIO_TIMEZONE"]))
+                  if os.environ.get("CONFIO_TIMEZONE") else datetime.now().astimezone())
     return {"datetime": now.isoformat(timespec="minutes"), "weekday": now.strftime("%A")}
 
 
@@ -317,7 +320,8 @@ class Agent:
         self.pending_call = None
         prefix = self.turn_dir / f"turn-{self.turn:02d}"
         seconds = len(voice_pcm) / 2 / SAMPLE_RATE
-        log.info("Turn %d: recorded %.1f s of voice", self.turn, seconds)
+        peak = max((abs(sample) for sample in array.array("h", voice_pcm)), default=0)
+        log.info("Turn %d: recorded %.1f s of voice; microphone peak %d/32767", self.turn, seconds, peak)
         if seconds < MIN_RECORDING_SECONDS:
             log.info("Turn %d: too short, ignored", self.turn)
             return None

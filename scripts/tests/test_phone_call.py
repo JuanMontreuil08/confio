@@ -134,6 +134,16 @@ class PhoneCallTests(unittest.TestCase):
         self.assertEqual(server.call(FakeLink([("H", b"")]), "+51999999999"), "cancelled")
         self.assertEqual(calls.hangups, 1)
 
+    def test_wifi_disconnect_during_dial_hangs_up_the_known_call(self):
+        server, calls = self.server([event("call.initiated")])
+        link = FakeLink()
+        def disconnected(on):
+            raise ConnectionError("WiFi lost")
+        link.call_mode = disconnected
+        with self.assertRaises(ConnectionError):
+            server.call(link, "+51999999999")
+        self.assertEqual(calls.hangups, 1)
+
     def test_events_for_other_calls_are_ignored(self):
         server, _ = self.server([("call.hangup", {"call_control_id": "other"}), event("call.initiated"),
                                  event("call.hangup", hangup_cause="busy")])
