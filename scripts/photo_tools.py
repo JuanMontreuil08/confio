@@ -70,7 +70,7 @@ def jpeg(data):
 
 
 class PhotoTools:
-    def __init__(self, config, meta_key, directory, contacts, session=None, image_client=None):
+    def __init__(self, config, meta_key, directory, contacts, session=None, image_client=None, capture=None):
         self.config = config
         self.directory = directory
         self.contacts = contacts
@@ -78,9 +78,10 @@ class PhotoTools:
         self.image_client = image_client or OpenAI(
             base_url="https://api.meta.ai/v1", api_key=meta_key, timeout=180, max_retries=0)
         self.photos = {}
-        camera = urlsplit(config["CAMERA_URL"])
+        self.capture = capture
+        camera = urlsplit(config.get("CAMERA_URL", ""))
         storage = urlsplit(config["SUPABASE_URL"])
-        if camera.scheme not in ("http", "https") or not camera.hostname or camera.username or camera.password:
+        if capture is None and (camera.scheme not in ("http", "https") or not camera.hostname or camera.username or camera.password):
             raise ValueError("CAMERA_URL must be the camera HTTP address without credentials")
         if storage.scheme != "https" or not storage.hostname or storage.username or storage.password:
             raise ValueError("SUPABASE_URL must be an HTTPS project URL without credentials")
@@ -127,8 +128,11 @@ class PhotoTools:
         original = b""
         # Existing camera firmware queues up to two frames while idle. Drain them
         # before selecting the new frame, otherwise a handheld shot can be old.
-        for _ in range(3):
-            original = self.request("get", self.config["CAMERA_URL"].rstrip("/") + "/photo").content
+        if self.capture is not None:
+            original = self.capture()  # WiFi camera drains stale buffers before sending.
+        else:
+            for _ in range(3):
+                original = self.request("get", self.config["CAMERA_URL"].rstrip("/") + "/photo").content
         jpeg(original)  # validate; preserve the camera's original bytes
         folder = self.directory / photo_id
         folder.mkdir(parents=True)

@@ -120,13 +120,15 @@ class TelnyxCalls:
 class PhoneServer:
     """Webhook + media WebSocket server on 127.0.0.1, running in a background thread."""
 
-    def __init__(self, calls, public_url, public_key, port=8766):
+    def __init__(self, calls, public_url, public_key, port=8766, loop=None):
         self.calls, self.public_url, self.port = calls, public_url.rstrip("/"), port
         self.receiver = EventReceiver(public_key, on_event=self.on_event)
         self.events, self.speaker = queue.Queue(), queue.Queue()
         self.token = None
         self.socket = None
-        self.loop = asyncio.new_event_loop()
+        self.loop = loop or asyncio.new_event_loop()
+        if loop is not None:
+            return  # Cloud service mounts webhook/media on its existing HTTP server.
         started = threading.Event()
         threading.Thread(target=self.serve, args=(started,), daemon=True).start()
         if not started.wait(10):
@@ -204,7 +206,6 @@ class PhoneServer:
             log.error("Dial failed: %s", error)
             return "failed"
         log.info("Dialing (call control %s)", call_id)
-        link.call_mode(True)
         outcome, answered_at, person, hangup_sent = None, None, False, None
         started = time.monotonic()
         got_event = False
@@ -219,6 +220,7 @@ class PhoneServer:
                 except Exception as error:
                     log.error("Hangup failed: %s. Check the Telnyx portal.", error)
         try:
+            link.call_mode(True)
             while True:
                 now = time.monotonic()
                 while not self.events.empty():
@@ -269,6 +271,12 @@ class PhoneServer:
                 elif kind == "I" and payload == READY_MESSAGE:
                     log.error("The ESP32 restarted during the call")
                     hang_up("failed")
+        except (ConnectionError, TimeoutError):
+            hang_up("failed")  # A disconnected gadget must not leave a known call live.
+            raise
         finally:
             self.token = None
-            link.call_mode(False)
+            try:
+                link.call_mode(False)
+            except (ConnectionError, TimeoutError):
+                pass

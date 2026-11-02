@@ -16,6 +16,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 import sys
 import time
@@ -77,8 +78,9 @@ def transcribe(session, api_key, wav_bytes):
 
 
 def get_current_datetime(now=None):
-    """The model has no clock; this tool reads the laptop's local date and time."""
-    now = now or datetime.now().astimezone()
+    """Read the configured user timezone, or local laptop time in USB mode."""
+    now = now or (datetime.now(ZoneInfo(os.environ["CONFIO_TIMEZONE"]))
+                  if os.environ.get("CONFIO_TIMEZONE") else datetime.now().astimezone())
     return {"datetime": now.isoformat(timespec="minutes"), "weekday": now.strftime("%A")}
 
 
