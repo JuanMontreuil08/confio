@@ -10,6 +10,7 @@ voice and the spoken answer saved as WAV files next to it. Conversation context
 stays in RAM until five minutes of idle waiting have elapsed.
 """
 import argparse
+import array
 import io
 import json
 import logging
@@ -319,7 +320,8 @@ class Agent:
         self.pending_call = None
         prefix = self.turn_dir / f"turn-{self.turn:02d}"
         seconds = len(voice_pcm) / 2 / SAMPLE_RATE
-        log.info("Turn %d: recorded %.1f s of voice", self.turn, seconds)
+        peak = max((abs(sample) for sample in array.array("h", voice_pcm)), default=0)
+        log.info("Turn %d: recorded %.1f s of voice; microphone peak %d/32767", self.turn, seconds, peak)
         if seconds < MIN_RECORDING_SECONDS:
             log.info("Turn %d: too short, ignored", self.turn)
             return None
