@@ -4,6 +4,7 @@ The asyncio loop owns sockets; one worker owns the synchronous Agent and call
 loop. No provider request blocks camera, microphone, hang-up or webhook input.
 """
 import asyncio
+import array
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import hmac
@@ -61,6 +62,8 @@ class WifiVoiceLink:
         if magic != MIC_MAGIC or kind not in MIC_TYPES or size != len(payload) or size > MAX_MIC_PAYLOAD:
             raise ValueError("Invalid voice frame")
         kind = chr(kind)
+        if kind in "IE":
+            log.info("ESP32 %s: %s", "info" if kind == "I" else "error", payload.decode("utf-8", "replace"))
         if kind in "DFMSAH" and (len(payload) % (4 if kind == "D" else 2)):
             raise ValueError("Misaligned audio")
         if kind in "SFAH" and payload:
@@ -136,6 +139,8 @@ class WifiVoiceLink:
                 return mono_channel(stereo)
 
     def play(self, pcm):
+        started = time.monotonic()
+        first_ack = self.acked
         for i in range(0, len(pcm) - len(pcm) % 2, PLAY_CHUNK_BYTES):
             self.send("P", pcm[i:i + PLAY_CHUNK_BYTES], paced=True)
         self.send("E", paced=True)
@@ -148,6 +153,9 @@ class WifiVoiceLink:
                 if remaining <= 0:
                     raise TimeoutError("Playback did not finish")
                 self.condition.wait(remaining)
+        peak = max((abs(value) for value in array.array("h", pcm[:len(pcm) - len(pcm) % 2])), default=0)
+        log.info("Playback complete: %d PCM bytes, peak %d/32767, %d acknowledgements, %.2f s",
+                 len(pcm), peak, self.acked - first_ack, time.monotonic() - started)
 
     def call_mode(self, on):
         if not on:
@@ -355,7 +363,9 @@ class CloudAgent:
                     link.play(self.agent.say(announcement))
                     self.agent.history.append({"role": "assistant", "content": announcement})
                 link.send("E", paced=True)  # release busy even for a short/empty turn
-            except (ConnectionError, TimeoutError):
+            except (ConnectionError, TimeoutError) as error:
+                if turn_started:
+                    log.warning("Cloud turn transport stopped (%s)", type(error).__name__)
                 link.close()
                 asyncio.run_coroutine_threadsafe(link.socket.close(), link.loop)
                 break
