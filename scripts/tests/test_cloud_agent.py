@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import re
 from pathlib import Path
 import struct
 import sys
@@ -122,6 +123,35 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status, 401)
         response = await self.client.get("/healthz")
         self.assertEqual(response.status, 200)
+
+    async def test_firmware_upgrade_header_keeps_the_websocket_open(self):
+        # Exercise the firmware's actual literal header fragments against the
+        # gateway. arduinoWebSockets 2.7.2 adds CRLF and then User-Agent itself.
+        source = (Path(__file__).resolve().parents[2] / "esp32/common/cloud_connection.h").read_text()
+        assignment = next(line for line in source.splitlines() if "headers = String(" in line)
+        literals = [json.loads(value) for value in re.findall(r'"(?:[^"\\]|\\.)*"', assignment)]
+        extra = literals[0] + "d" * 40 + "".join(literals[1:])
+        server = self.client.server
+        reader, writer = await asyncio.open_connection(server.host, server.port)
+        request = ("GET /device HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\n"
+                   "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
+                   "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" + extra +
+                   "\r\nUser-Agent: arduino-WebSocket-Client\r\n\r\n")
+        try:
+            writer.write(request.encode())
+            await writer.drain()
+            response = await reader.readuntil(b"\r\n\r\n")
+            self.assertIn(b"101 Switching Protocols", response)
+            # Initial binary SPK1 N reset. A malformed upgrade instead follows
+            # this with a close frame (1002), even though HTTP returned 101.
+            head = await reader.readexactly(2)
+            self.assertEqual(head[0] & 15, 2)
+            self.assertEqual(await reader.readexactly(head[1] & 127), cloud.pack("N"))
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(reader.readexactly(2), timeout=0.25)
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
     async def test_deployment_waits_for_recording_turn_or_call(self):
         headers = {"Authorization": "Bearer " + "a" * 40}

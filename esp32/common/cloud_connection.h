@@ -24,14 +24,22 @@ class CloudConnection {
     configTime(0, 0, "time.cloudflare.com", "pool.ntp.org");
     socket.onEvent(handler);
     socket.beginSslWithCA(CONFIO_HOST, 443, path, kCloudRoots, "");
-    headers = String("Authorization: Bearer ") + CONFIO_TOKEN + "\r\n";
+    // WebSocketsClient appends CRLF itself; a second one ends the upgrade early.
+    headers = String("Authorization: Bearer ") + CONFIO_TOKEN;
     socket.setExtraHeaders(headers.c_str());
     socket.setReconnectInterval(5000);
     socket.enableHeartbeat(20000, 10000, 2);
   }
   void poll() {
+    const int status = WiFi.status();
+    const bool clockReady = time(nullptr) > 1735689600;
+    if (status != previousStatus || clockReady != previousClockReady) {
+      Serial.printf("WiFi status %d; clock %s\n", status, clockReady ? "ready" : "waiting");
+      previousStatus = status;
+      previousClockReady = clockReady;
+    }
     // Certificate validity requires a real clock. Never fall back to insecure TLS.
-    if (WiFi.status() == WL_CONNECTED && time(nullptr) > 1735689600) socket.loop();
+    if (status == WL_CONNECTED && clockReady) socket.loop();
     else if (connected) {
       connected = false;
       socket.disconnect();
@@ -39,4 +47,6 @@ class CloudConnection {
   }
  private:
   String headers;
+  int previousStatus = -1;
+  bool previousClockReady = false;
 };

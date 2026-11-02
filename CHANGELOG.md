@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.3.1 — 2026-11-02
+
+- Fix the shared Arduino WebSocket authorization header: the library appends its own CRLF, so an extra terminator caused HTTP 101 upgrades to close immediately with protocol error 1002.
+- Add a raw-upgrade regression against the gateway and credential-free WiFi/clock diagnostics for board bring-up.
+
 ## 0.0.3.0 — 2026-11-02
 
 - Add a single-device Modal gateway that reuses the existing voice agent and all six tools over authenticated WiFi.
