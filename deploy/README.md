@@ -113,6 +113,23 @@ partial-turn disconnects, camera correlation, deployment draining and call
 termination after transport loss. Hardware acceptance is a short check of one
 voice answer, a call/cancel and photo/SMS without the laptop agent running.
 
+The user has now verified real WiFi spoken answers, internet search, phone
+calling and the photo flow with the camera powered by a power bank. Logs confirm
+capture, Muse Image restoration, Supabase storage and queued photo SMS. WiFi
+button-2 cancellation was not separately confirmed. Physical mic/amp contacts
+still need to remain secure; playback acknowledgements alone do not prove sound.
+
+## Next functionality (not implemented)
+
+- Send a voice-dictated text SMS to a saved contact without requiring a photo.
+- Include user-dictated text alongside a photo's signed link in the same SMS.
+- Preserve the current voice/button interaction, saved-contact restrictions and
+  the rule against automatically retrying sends with an unknown outcome.
+
+Currently `send_photo_sms` accepts only `photo_id` and `contact`, uses a fixed
+caption, and there is no general text-SMS tool. This follow-up is documented for
+a later change; it is not part of the current implementation.
+
 References: [Modal WebSockets](https://modal.com/docs/guide/webhooks),
 [concurrency](https://modal.com/docs/guide/concurrent-inputs),
 [Secrets](https://modal.com/docs/guide/secrets),
