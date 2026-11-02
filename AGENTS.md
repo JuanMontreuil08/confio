@@ -83,6 +83,16 @@ This file describes the **first target flow only**, at a high level. Details wil
 - Keep it simple and demo-first.
 - User-facing language is Spanish; code and docs are in English.
 
+## Modal / WiFi migration (branch `codex/modal-wifi`)
+
+- `scripts/cloud_agent.py` wraps the existing voice Agent and all current tools in one aiohttp service. `deploy/modal_app.py` deploys it on Modal: 0.5 CPU, 512 MiB, max one container, 16 concurrent inputs, 24-hour execution timeout. No GPU or new conversation database. Supabase remains the photo store; RAM history keeps its existing five-minute idle rule and is lost on server restart/deploy.
+- Gateway: `https://juanmontreuil71--confio-gateway.us-east.modal.run`. Public `/healthz` and authenticated `/admin/status` were verified; the latter lists all six tools. Device/camera endpoints reject unauthenticated requests. No live provider action was triggered by these checks.
+- Both boards initiate TLS WebSockets to `/device` and `/camera`. Each uses a different token; providers' keys stay in Modal Secret `confio`. Telnyx still verifies signed events, with per-call media tokens and the Modal callback URL replacing ngrok. Known calls are hung up on gadget transport loss; there is no automatic call/SMS replay.
+- Firmware environments `esp32wifi` (voice) and `esp32camwifi` (camera) compiled successfully; the default `esp32dev` and `esp32cam` targets preserve USB/local behavior. Pin mappings and volume are unchanged. Hardware upload and real WiFi voice/call/photo acceptance are still pending; compilation is not proof of hardware operation.
+- `.github/workflows/modal.yml` checks Python/Node tests and compiles both WiFi targets with examples. Deployment is gated by `CONFIO_DEPLOY_ENABLED=true`; configure deployment tokens and the `CONFIO_PUBLIC_URL` Actions variable first. It waits for an interaction to finish and drains both board connections before deploying. Server updates do not flash firmware.
+- User created Modal CLI authentication in ignored `.modal-local/config.toml`; it expires after seven days. Do not inspect or display it. The user enters provider secrets directly in Modal. Ignored `.modal-local/modal-extra-secrets.env` contains only the migration contacts/public key/device-admin tokens prepared for their manual import. Runtime use must never print those values. Do not read root `.env` manually.
+- User may change cloud contacts with `CONTACTS_JSON` in Modal; this is independent of local USB `contacts.json`. After secret changes, redeploy or use `modal app rollover confio` while idle. See `deploy/README.md` and `deploy/SECRETS.md`.
+
 ## Voice photo sharing (branch `codex/photo-sms`)
 
 - Current camera scope supersedes the SAM/room-search proposal: use the power-bank camera as the user's handheld photo camera. User asks to prepare a photo, then presses the voice button again when ready. Spark decides intent from conversation, without keyword routing.
