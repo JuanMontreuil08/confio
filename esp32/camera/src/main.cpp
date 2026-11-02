@@ -3,7 +3,9 @@
 #include <WebServer.h>
 #include <esp_camera.h>
 #include <esp_http_server.h>
+#ifndef CONFIO_WIFI
 #include "wifi_credentials.h"
+#endif
 
 WebServer server(80);
 SemaphoreHandle_t cameraMutex;
@@ -50,6 +52,10 @@ void sendPhoto() {
   xSemaphoreGive(cameraMutex);
 }
 
+#ifdef CONFIO_WIFI
+#include "cloud_camera.h"
+#endif
+
 void setup() {
   Serial.begin(115200);
   pinMode(4, OUTPUT);
@@ -90,6 +96,9 @@ void setup() {
     return;
   }
 
+#ifdef CONFIO_WIFI
+  cloud.begin("/camera", cameraEvent);
+#else
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to WiFi");
@@ -126,8 +135,14 @@ void setup() {
   } else {
     Serial.println("Video server failed to start");
   }
+#endif
 }
 
 void loop() {
+#ifdef CONFIO_WIFI
+  cloud.poll();
+  delay(1);
+#else
   server.handleClient();
+#endif
 }
