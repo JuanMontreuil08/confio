@@ -138,6 +138,33 @@ class PhotoTests(unittest.TestCase):
         self.assertEqual(service.run("send_photo_sms", args)["status"], "unknown")
         self.assertEqual(len(self.http.calls), 7)
 
+    def test_text_only_preserves_dictation_and_checks_status_without_resending(self):
+        service = self.service([sms(), sms("delivered")])
+        text = "Hola, Naty. Llego a las seis."
+        args = json.dumps({"contact": "náty", "text": text})
+        self.assertEqual(service.run("send_sms", args)["status"], "queued")
+        self.assertEqual(service.refresh_sms()[0]["status"], "delivered")
+        self.assertEqual(service.run("send_sms", args)["status"], "delivered")
+        self.assertEqual([call[0] for call in self.http.calls], ["post", "get"])
+        self.assertEqual(self.http.calls[0][2]["json"]["text"], text)
+        self.assertFalse(self.edits)
+
+    def test_text_only_timeout_does_not_resend(self):
+        service = self.service([requests.Timeout()])
+        args = json.dumps({"contact": "Naty", "text": "Ya llegué."})
+        self.assertIn("error", service.run("send_sms", args))
+        self.assertEqual(service.run("send_sms", args)["status"], "unknown")
+        self.assertEqual(len(self.http.calls), 1)
+
+    def test_photo_caption_is_sent_in_the_same_sms_as_the_link(self):
+        service = self.service([FakeResponse(body={"signedURL": "/object/sign/photos/x.jpg?token=fake"}),
+                                sms()])
+        service.photos["photo"] = {"id": "photo", "saved": True, "sms": {}}
+        args = {"photo_id": "photo", "contact": "Naty", "text": "Mira esta foto."}
+        self.assertEqual(service.run("send_photo_sms", json.dumps(args))["status"], "queued")
+        payload = self.http.calls[1][2]["json"]
+        self.assertEqual(payload["text"], "Mira esta foto. https://example.supabase.co/storage/v1/object/sign/photos/x.jpg?token=fake")
+
     def test_partial_upload_is_reused_on_retry(self):
         service = self.service([FakeResponse(content=image_bytes()), FakeResponse(), FakeResponse(status=503), FakeResponse()])
         photo_id = self.capture(service)

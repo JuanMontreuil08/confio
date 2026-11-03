@@ -185,7 +185,8 @@ def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_E
         for call in calls:
             result = ({"error": "Tool round limit reached. No action was executed."}
                       if round_number == max_rounds else run(call.name, call.arguments))
-            log.info("Tool %s(%s) -> %s", call.name, call.arguments, json.dumps(result))
+            logged_args = "[SMS arguments omitted]" if call.name in ("send_sms", "send_photo_sms") else call.arguments
+            log.info("Tool %s(%s) -> %s", call.name, logged_args, json.dumps(result))
             history.append({"type": "function_call_output", "call_id": call.call_id,
                             "output": json.dumps(result)})
         if round_number == max_rounds:
@@ -268,7 +269,7 @@ class Agent:
         self.pending_call = None  # (name, number) chosen by the model during this turn
 
     def run_tool(self, name, arguments):
-        if getattr(self, "photos", None) and name in ("take_photo", "save_photo", "send_photo_sms"):
+        if getattr(self, "photos", None) and name in ("take_photo", "save_photo", "send_photo_sms", "send_sms"):
             if name == "take_photo" and self.capture_result is not None:
                 return self.capture_result
             result = self.photos.run(name, arguments)

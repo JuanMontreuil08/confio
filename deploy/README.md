@@ -119,16 +119,13 @@ capture, Muse Image restoration, Supabase storage and queued photo SMS. WiFi
 button-2 cancellation was not separately confirmed. Physical mic/amp contacts
 still need to remain secure; playback acknowledgements alone do not prove sound.
 
-## Next functionality (not implemented)
+## Voice SMS
 
-- Send a voice-dictated text SMS to a saved contact without requiring a photo.
-- Include user-dictated text alongside a photo's signed link in the same SMS.
-- Preserve the current voice/button interaction, saved-contact restrictions and
-  the rule against automatically retrying sends with an unknown outcome.
-
-Currently `send_photo_sms` accepts only `photo_id` and `contact`, uses a fixed
-caption, and there is no general text-SMS tool. This follow-up is documented for
-a later change; it is not part of the current implementation.
+Ask to send a text to a saved contact, or share a saved photo with optional
+dictated text. If no text is specified for a photo, the agent asks whether to
+add a message unless the user explicitly asks to send only the photo. Photo
+messages include a signed link. Both tools check delivery without automatically
+retrying an uncertain send.
 
 References: [Modal WebSockets](https://modal.com/docs/guide/webhooks),
 [concurrency](https://modal.com/docs/guide/concurrent-inputs),

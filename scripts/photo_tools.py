@@ -50,7 +50,12 @@ def photo_tools(names):
         tool("send_photo_sms", "Send a saved photo link to a saved contact via SMS. "
              "Repeated calls for the same photo/contact CHECK delivery status; never resend. "
              "Use this also when asked whether the photo arrived. Saved contacts: " + ", ".join(names) + ".",
-             {"photo_id": {"type": "string"}, "contact": {"type": "string"}}, ["photo_id", "contact"]),
+             {"photo_id": {"type": "string"}, "contact": {"type": "string"},
+              "text": {"type": "string", "description": "Optional exact message dictated by the user."}},
+             ["photo_id", "contact"]),
+        tool("send_sms", "Send the user's exact text, without a photo, to a saved contact. "
+             "Repeated calls with the same text and contact check status. Saved contacts: " + ", ".join(names) + ".",
+             {"contact": {"type": "string"}, "text": {"type": "string"}}, ["contact", "text"]),
     ]
 
 
@@ -78,6 +83,7 @@ class PhotoTools:
         self.image_client = image_client or OpenAI(
             base_url="https://api.meta.ai/v1", api_key=meta_key, timeout=180, max_retries=0)
         self.photos = {}
+        self.text_messages = {}
         self.capture = capture
         camera = urlsplit(config.get("CAMERA_URL", ""))
         storage = urlsplit(config["SUPABASE_URL"])
@@ -93,6 +99,7 @@ class PhotoTools:
 
     def reset(self):
         self.photos.clear()
+        self.text_messages.clear()
 
     def request(self, method, url, **kwargs):
         response = getattr(self.session, method)(url, timeout=30, allow_redirects=False, **kwargs)
@@ -105,18 +112,22 @@ class PhotoTools:
         try:
             args = json.loads(arguments or "{}")
             expected = {"take_photo": set(), "save_photo": {"photo_id"},
-                        "send_photo_sms": {"photo_id", "contact"}}[name]
-            if not isinstance(args, dict) or set(args) != expected or any(
+                        "send_photo_sms": {"photo_id", "contact"},
+                        "send_sms": {"contact", "text"}}[name]
+            allowed = expected | {"text"} if name == "send_photo_sms" else expected
+            if not isinstance(args, dict) or not expected <= set(args) <= allowed or any(
                     not isinstance(v, str) or not v.strip() for v in args.values()):
                 return {"error": "Invalid tool arguments"}
             if name == "take_photo":
                 return self.take_photo()
+            if name == "send_sms":
+                return self.send_sms(args["contact"], args["text"])
             photo = self.photos.get(args["photo_id"])
             if not photo:
                 return {"error": "Unknown photo_id. Use the ID returned by take_photo."}
             if name == "save_photo":
                 return self.save_photo(photo)
-            return self.send_photo_sms(photo, args["contact"])
+            return self.send_photo_sms(photo, args["contact"], args.get("text"))
         except (requests.RequestException, OpenAIError, ValueError, KeyError, TypeError,
                 AttributeError, UnidentifiedImageError, OSError, binascii.Error) as error:
             log.warning("Photo tool %s failed (%s)", name, type(error).__name__)
@@ -163,12 +174,25 @@ class PhotoTools:
         log.info("Photo %s saved to Supabase (original + restored)", photo["id"])
         return {"photo_id": photo["id"], "status": "saved", "next": "send_photo_sms if a recipient was requested"}
 
-    def send_photo_sms(self, photo, contact):
-        match = next((name for name in self.contacts if name_key(name) == name_key(contact)), None)
+    def match_contact(self, contact):
+        return next((name for name in self.contacts if name_key(name) == name_key(contact)), None)
+
+    def send_sms(self, contact, text):
+        match = self.match_contact(contact)
+        if not match:
+            return {"error": "Unknown saved contact", "saved_contacts": list(self.contacts)}
+        key = (match, text)
+        if key in self.text_messages:
+            return self.sms_status(self.text_messages[key])
+        result = self.text_messages[key] = {"contact": match, "status": "unknown"}
+        return self.post_sms(result, text)
+
+    def send_photo_sms(self, photo, contact, text=None):
+        match = self.match_contact(contact)
         if not match:
             return {"error": "Unknown saved contact", "saved_contacts": list(self.contacts)}
         if match in photo["sms"]:
-            return self.sms_status(photo, match)
+            return self.sms_status(photo["sms"][match])
         if not photo["saved"]:
             return {"error": "Photo is not saved. Call save_photo first."}
         bucket = quote(self.config["SUPABASE_STORAGE_BUCKET"], safe="")
@@ -181,15 +205,20 @@ class PhotoTools:
         if urlsplit(link).netloc != urlsplit(self.storage_url).netloc or urlsplit(link).scheme != "https":
             raise ValueError("Invalid signed photo URL")
         # Mark before POST: an ambiguous timeout must not cause a duplicate send.
-        photo["sms"][match] = {"contact": match, "status": "unknown", "photo_id": photo["id"]}
+        result = photo["sms"][match] = {"contact": match, "status": "unknown", "photo_id": photo["id"]}
+        caption = text if text is not None else "Confio: te compartieron una foto."
+        return self.post_sms(result, caption + " " + link)
+
+    def post_sms(self, result, text):
+        # Both callers register the attempt before posting, including on ambiguous failures.
         data = self.request("post", "https://api.telnyx.com/v2/messages",
             headers={"Authorization": "Bearer " + self.config["TELNYX_API_KEY"]},
-            json={"from": self.config["TELNYX_SMS_SENDER"], "to": self.contacts[match],
+            json={"from": self.config["TELNYX_SMS_SENDER"], "to": self.contacts[result["contact"]],
                   "messaging_profile_id": self.config["TELNYX_MESSAGING_PROFILE_ID"],
-                  "type": "SMS", "text": "Confio: te compartieron una foto. " + link}).json()["data"]
-        photo["sms"][match].update(self.message_status(data))
-        log.info("Photo %s SMS status=%s", photo["id"], photo["sms"][match]["status"])
-        return dict(photo["sms"][match])
+                  "type": "SMS", "text": text}).json()["data"]
+        result.update(self.message_status(data))
+        log.info("SMS status=%s", result["status"])
+        return dict(result)
 
     @staticmethod
     def message_status(data):
@@ -199,8 +228,7 @@ class PhotoTools:
         return {"message_id": data["id"], "status": status,
                 "delivered": status == "delivered", "parts": data.get("parts")}
 
-    def sms_status(self, photo, contact):
-        result = photo["sms"][contact]
+    def sms_status(self, result):
         if result.get("message_id") and result["status"] not in ("delivered", "failed", "sending_failed", "delivery_failed"):
             data = self.request("get", "https://api.telnyx.com/v2/messages/" + quote(result["message_id"], safe=""),
                 headers={"Authorization": "Bearer " + self.config["TELNYX_API_KEY"]}).json()["data"]
@@ -210,15 +238,16 @@ class PhotoTools:
     def refresh_sms(self):
         """Refresh pending delivery on the next user turn; never sends a message."""
         updates = []
-        for photo in self.photos.values():
-            for contact, previous in photo["sms"].items():
-                if previous["status"] in ("delivered", "failed", "sending_failed", "delivery_failed", "unknown"):
-                    continue
-                old = dict(previous)
-                try:
-                    current = self.sms_status(photo, contact)
-                    if current != old:
-                        updates.append(current)
-                except (requests.RequestException, ValueError, KeyError, TypeError):
-                    log.warning("Could not refresh SMS delivery (photo %s)", photo["id"])
+        messages = [*self.text_messages.values(),
+                    *(result for photo in self.photos.values() for result in photo["sms"].values())]
+        for previous in messages:
+            if previous["status"] in ("delivered", "failed", "sending_failed", "delivery_failed", "unknown"):
+                continue
+            old = dict(previous)
+            try:
+                current = self.sms_status(previous)
+                if current != old:
+                    updates.append(current)
+            except (requests.RequestException, ValueError, KeyError, TypeError):
+                log.warning("Could not refresh SMS delivery")
         return updates
