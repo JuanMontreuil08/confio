@@ -46,6 +46,7 @@ Confio uses Wi-Fi and replaces the smartphone interface with a physical button, 
 ## 5. Next Steps · From a Prototype to Everyday Independence
 
 - **Portable hardware.** Shrink the circuit and put it in a 3D-printed enclosure so people can carry Confio around the house.
+- **A more visual experience.** Add a small round display to Confio so users can see a dialing animation with the contact’s name or preview a photo they just took.
 - **Home sensors.** Connect door and light sensors so users can ask whether a door opened or a light is off.
 - **An agent-operated computer.** Give the agent a dedicated virtual machine to create a presentation, help with a spreadsheet, or teach Excel step by step. The agent could share the result through a link the user can open on a computer.
 - **Banking by voice.** Explore Open Banking integrations for account queries, payments, and transfers, with authentication and explicit confirmation before moving money.
