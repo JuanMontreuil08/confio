@@ -85,10 +85,10 @@ class DemoSession:
         self.agent = Agent(key, os.environ["CARTESIA_API_KEY"], DEFAULT_VOICE_ID,
                            prompt, directory, contacts=contacts, photos=self.photos)
 
-    def turn(self, text, audio, language, webcam=None):
+    def turn(self, text, audio, webcam=None):
         agent = self.agent
         if audio:
-            text = transcribe(agent.session, agent.meta_key, audio, ("english", "spanish"))
+            text = transcribe(agent.session, agent.meta_key, audio)
         if not text:
             return {"error": "No speech detected."}
         self.providers.events.clear()
@@ -142,7 +142,7 @@ class DemoSession:
                 result["webcam_original"] = base64.b64encode(webcam).decode()
         if reply:
             try:
-                pcm = synthesize(agent.session, agent.cartesia_key, agent.voice_id, reply, language)
+                pcm = synthesize(agent.session, agent.cartesia_key, agent.voice_id, reply)
                 result["audio"] = base64.b64encode(to_wav(pcm)).decode()
             except (RuntimeError, requests.RequestException):
                 result["audio_error"] = True
@@ -181,7 +181,6 @@ def create_app(sample):
             state = sessions[key] = DemoSession(sample)
         if state.busy or now - state.touched < 1 and state.agent.history:
             raise web.HTTPTooManyRequests()
-        language = "es" if request.query.get("lang") == "es" else "en"
         audio = data if request.content_type == "audio/wav" else None
         webcam = None
         if request.content_type == "image/jpeg":
@@ -190,8 +189,7 @@ def create_app(sample):
             except (OSError, ValueError):
                 raise web.HTTPBadRequest(text="Invalid webcam image") from None
         if webcam is not None:
-            text = ("Ya apunté mi cámara. Toma la foto ahora." if language == "es"
-                    else "I have aimed my camera and I am ready. Take the photo now.")
+            text = "I have aimed my camera and I am ready. Take the photo now."
         else:
             text = "" if audio else data.decode("utf-8", errors="replace").strip()
         if audio is None and not 0 < len(text) <= 500:
@@ -203,7 +201,7 @@ def create_app(sample):
             recent_turns.append(now)
         state.busy = True
         try:
-            result = await asyncio.to_thread(state.turn, text, audio, language, webcam)
+            result = await asyncio.to_thread(state.turn, text, audio, webcam)
         except Exception as error:
             print("Demo turn failed:", type(error).__name__, file=sys.stderr)
             result = {"error": "A demo service did not respond. Please try again."}

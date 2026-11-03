@@ -40,7 +40,7 @@ async function submit(body, type = 'text/plain') {
   turn.scrollIntoView({block:'nearest'});
   get('audio').pause();
   try {
-    const response = await fetch('/turn?lang=' + (navigator.language.startsWith('es') ? 'es' : 'en'), {method:'POST', headers:{'Content-Type':type}, body});
+    const response = await fetch('/turn', {method:'POST', headers:{'Content-Type':type}, body});
     if (!response.ok) throw Error('The demo is busy or the request was too large. Try again.');
     const result = await response.json();
     if (result.error) throw Error(result.error);
