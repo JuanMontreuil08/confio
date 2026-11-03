@@ -86,11 +86,11 @@ class PhotoTests(unittest.TestCase):
         self.assertEqual(service.run("save_photo", args)["status"], "saved")
         self.assertEqual(service.run("save_photo", args)["status"], "saved")  # no second upload
         send_args = json.dumps({"photo_id": photo_id, "contact": "náty"})
-        first = service.run("send_photo_sms", send_args)
+        first = service.run("send_sms", send_args)
         self.assertEqual(first["status"], "queued")
         self.assertFalse(first["delivered"])
         self.assertNotIn("token=", json.dumps(first))
-        final = service.run("send_photo_sms", send_args)
+        final = service.refresh_sms()[0]
         self.assertTrue(final["delivered"])
         posts = [c for c in self.http.calls if c[0] == "post" and c[1] == "https://api.telnyx.com/v2/messages"]
         self.assertEqual(len(posts), 1)
@@ -121,7 +121,7 @@ class PhotoTests(unittest.TestCase):
         service = self.service([FakeResponse(content=image_bytes())])
         photo_id = self.capture(service)
         for name in ("Naty", "+51988888888", "Nobody"):
-            result = service.run("send_photo_sms", json.dumps({"photo_id": photo_id, "contact": name}))
+            result = service.run("send_sms", json.dumps({"photo_id": photo_id, "contact": name}))
             self.assertIn("error", result)
         self.assertEqual(len(self.http.calls), 3)
 
@@ -132,10 +132,10 @@ class PhotoTests(unittest.TestCase):
         photo_id = self.capture(service)
         service.run("save_photo", json.dumps({"photo_id": photo_id}))
         args = json.dumps({"photo_id": photo_id, "contact": "Naty"})
-        result = service.run("send_photo_sms", args)
+        result = service.run("send_sms", args)
         self.assertIn("error", result)
         self.assertNotIn("private-url-or-number", json.dumps(result))
-        self.assertEqual(service.run("send_photo_sms", args)["status"], "unknown")
+        self.assertEqual(service.run("send_sms", args)["status"], "unknown")
         self.assertEqual(len(self.http.calls), 7)
 
     def test_text_only_preserves_dictation_and_checks_status_without_resending(self):
@@ -149,6 +149,11 @@ class PhotoTests(unittest.TestCase):
         self.assertEqual(self.http.calls[0][2]["json"]["text"], text)
         self.assertFalse(self.edits)
 
+    def test_send_requires_text_or_photo(self):
+        service = self.service([])
+        self.assertIn("error", service.run("send_sms", '{"contact":"Naty"}'))
+        self.assertEqual(self.http.calls, [])
+
     def test_text_only_timeout_does_not_resend(self):
         service = self.service([requests.Timeout()])
         args = json.dumps({"contact": "Naty", "text": "Ya llegué."})
@@ -161,7 +166,7 @@ class PhotoTests(unittest.TestCase):
                                 sms()])
         service.photos["photo"] = {"id": "photo", "saved": True, "sms": {}}
         args = {"photo_id": "photo", "contact": "Naty", "text": "Mira esta foto."}
-        self.assertEqual(service.run("send_photo_sms", json.dumps(args))["status"], "queued")
+        self.assertEqual(service.run("send_sms", json.dumps(args))["status"], "queued")
         payload = self.http.calls[1][2]["json"]
         self.assertEqual(payload["text"], "Mira esta foto. https://example.supabase.co/storage/v1/object/sign/photos/x.jpg?token=fake")
 
@@ -189,7 +194,7 @@ class PhotoTests(unittest.TestCase):
         responses = [text_response("Apunta la cámara y avísame cuando estés listo."),
                      tool_response("take_photo"),
                      tool_response("save_photo", '{"photo_id":"photo-one"}'),
-                     tool_response("send_photo_sms", '{"photo_id":"photo-one","contact":"Naty"}'),
+                     tool_response("send_sms", '{"photo_id":"photo-one","contact":"Naty"}'),
                      text_response("La foto está guardada y el SMS está en cola."),
                      text_response("Sí, el SMS fue entregado a Naty.")]
         agent.client, chat_requests = fake_client(*responses)

@@ -124,8 +124,7 @@ still need to remain secure; playback acknowledgements alone do not prove sound.
 Ask to send a text to a saved contact, or share a saved photo with optional
 dictated text. If no text is specified for a photo, the agent asks whether to
 add a message unless the user explicitly asks to send only the photo. Photo
-messages include a signed link. Both tools check delivery without automatically
-retrying an uncertain send.
+messages include a signed link. `send_sms` handles all sends. Pending delivery status is refreshed at the start of each voice turn.
 
 References: [Modal WebSockets](https://modal.com/docs/guide/webhooks),
 [concurrency](https://modal.com/docs/guide/concurrent-inputs),

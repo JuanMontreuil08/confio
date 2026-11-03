@@ -47,15 +47,11 @@ def photo_tools(names):
         tool("save_photo", "Save the captured original and restored photo to Supabase Storage. "
              "Required before sending. Repeated calls reuse the saved photo.",
              {"photo_id": {"type": "string"}}, ["photo_id"]),
-        tool("send_photo_sms", "Send a saved photo link to a saved contact via SMS. "
-             "Repeated calls for the same photo/contact CHECK delivery status; never resend. "
-             "Use this also when asked whether the photo arrived. Saved contacts: " + ", ".join(names) + ".",
-             {"photo_id": {"type": "string"}, "contact": {"type": "string"},
-              "text": {"type": "string", "description": "Optional exact message dictated by the user."}},
-             ["photo_id", "contact"]),
-        tool("send_sms", "Send the user's exact text, without a photo, to a saved contact. "
-             "Repeated calls with the same text and contact check status. Saved contacts: " + ", ".join(names) + ".",
-             {"contact": {"type": "string"}, "text": {"type": "string"}}, ["contact", "text"]),
+        tool("send_sms", "Send one SMS to a saved contact, with the user's exact text, "
+             "a saved photo link, or both. Include at least one of text and photo_id. "
+             "Only call when the user asks to send. Saved contacts: " + ", ".join(names) + ".",
+             {"contact": {"type": "string"}, "text": {"type": "string"}, "photo_id": {"type": "string"}},
+             ["contact"]),
     ]
 
 
@@ -111,23 +107,27 @@ class PhotoTools:
     def run(self, name, arguments):
         try:
             args = json.loads(arguments or "{}")
-            expected = {"take_photo": set(), "save_photo": {"photo_id"},
-                        "send_photo_sms": {"photo_id", "contact"},
-                        "send_sms": {"contact", "text"}}[name]
-            allowed = expected | {"text"} if name == "send_photo_sms" else expected
-            if not isinstance(args, dict) or not expected <= set(args) <= allowed or any(
+            required, optional = {
+                "take_photo": (set(), set()),
+                "save_photo": ({"photo_id"}, set()),
+                "send_sms": ({"contact"}, {"text", "photo_id"}),
+            }[name]
+            if not isinstance(args, dict) or not required <= set(args) <= required | optional or any(
                     not isinstance(v, str) or not v.strip() for v in args.values()):
                 return {"error": "Invalid tool arguments"}
             if name == "take_photo":
                 return self.take_photo()
-            if name == "send_sms":
-                return self.send_sms(args["contact"], args["text"])
-            photo = self.photos.get(args["photo_id"])
-            if not photo:
+            photo_id = args.get("photo_id")
+            photo = self.photos.get(photo_id)
+            if photo_id is not None and photo is None:
                 return {"error": "Unknown photo_id. Use the ID returned by take_photo."}
             if name == "save_photo":
                 return self.save_photo(photo)
-            return self.send_photo_sms(photo, args["contact"], args.get("text"))
+            if photo is not None:
+                return self.send_photo_sms(photo, args["contact"], args.get("text"))
+            if "text" not in args:
+                return {"error": "Provide text, a saved photo_id, or both."}
+            return self.send_text_sms(args["contact"], args["text"])
         except (requests.RequestException, OpenAIError, ValueError, KeyError, TypeError,
                 AttributeError, UnidentifiedImageError, OSError, binascii.Error) as error:
             log.warning("Photo tool %s failed (%s)", name, type(error).__name__)
@@ -172,18 +172,18 @@ class PhotoTools:
             photo["uploaded"].add(variant)
         photo["saved"] = True
         log.info("Photo %s saved to Supabase (original + restored)", photo["id"])
-        return {"photo_id": photo["id"], "status": "saved", "next": "send_photo_sms if a recipient was requested"}
+        return {"photo_id": photo["id"], "status": "saved", "next": "send_sms when recipient and message choice are clear"}
 
     def match_contact(self, contact):
         return next((name for name in self.contacts if name_key(name) == name_key(contact)), None)
 
-    def send_sms(self, contact, text):
+    def send_text_sms(self, contact, text):
         match = self.match_contact(contact)
         if not match:
             return {"error": "Unknown saved contact", "saved_contacts": list(self.contacts)}
         key = (match, text)
         if key in self.text_messages:
-            return self.sms_status(self.text_messages[key])
+            return dict(self.text_messages[key])
         result = self.text_messages[key] = {"contact": match, "status": "unknown"}
         return self.post_sms(result, text)
 
@@ -192,7 +192,7 @@ class PhotoTools:
         if not match:
             return {"error": "Unknown saved contact", "saved_contacts": list(self.contacts)}
         if match in photo["sms"]:
-            return self.sms_status(photo["sms"][match])
+            return dict(photo["sms"][match])
         if not photo["saved"]:
             return {"error": "Photo is not saved. Call save_photo first."}
         bucket = quote(self.config["SUPABASE_STORAGE_BUCKET"], safe="")
@@ -210,7 +210,6 @@ class PhotoTools:
         return self.post_sms(result, caption + " " + link)
 
     def post_sms(self, result, text):
-        # Both callers register the attempt before posting, including on ambiguous failures.
         data = self.request("post", "https://api.telnyx.com/v2/messages",
             headers={"Authorization": "Bearer " + self.config["TELNYX_API_KEY"]},
             json={"from": self.config["TELNYX_SMS_SENDER"], "to": self.contacts[result["contact"]],
@@ -238,9 +237,8 @@ class PhotoTools:
     def refresh_sms(self):
         """Refresh pending delivery on the next user turn; never sends a message."""
         updates = []
-        messages = [*self.text_messages.values(),
-                    *(result for photo in self.photos.values() for result in photo["sms"].values())]
-        for previous in messages:
+        for previous in [*self.text_messages.values(),
+                         *(result for photo in self.photos.values() for result in photo["sms"].values())]:
             if previous["status"] in ("delivered", "failed", "sending_failed", "delivery_failed", "unknown"):
                 continue
             old = dict(previous)
