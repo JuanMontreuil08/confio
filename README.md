@@ -24,7 +24,20 @@ Confio uses Wi-Fi and replaces the smartphone interface with a physical button, 
 
 ## 3. Technical Depth & Execution · From Button Press to Action
 
-<!-- Reserved for the Excalidraw architecture diagram. -->
+[![Confio architecture from the ESP32 button through the Modal agent and its tools to the speaker](media/confio-architecture.svg)](media/confio-architecture.svg)
+
+| Component or tool | Role in Confio |
+| --- | --- |
+| ESP32 DevKit | Reads the push-to-talk button, streams microphone audio over Wi-Fi, and plays the audio returned by the agent. |
+| INMP441 microphone | Captures the user's voice while they hold the push-to-talk button. |
+| Modal gateway | Hosts the Python agent and accepts authenticated WebSocket connections from the voice device and camera. |
+| Web search (`web_search`) | Looks up current information and provides sources the agent can cite in its answer. |
+| Date and time (`get_current_datetime`) | Gives the agent the current date and time in the America/Lima time zone. |
+| Telnyx | Connects phone calls and sends text messages or photo links to saved contacts. |
+| ESP32-CAM | Takes a photo on request and sends the captured JPEG to the agent over Wi-Fi. |
+| Supabase Storage | Stores the original and restored photos in a private bucket and provides expiring links for sharing. |
+| Cartesia | Converts the agent's written reply into speech for playback on the device. |
+| MAX98357A amplifier and speaker | Amplifies the ESP32's digital audio output and plays it aloud. |
 
 ## 4. Demo
 
