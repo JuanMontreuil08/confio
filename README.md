@@ -26,7 +26,7 @@ Confio uses Wi-Fi and replaces the smartphone interface with a physical button, 
 
 [![Confio architecture from the ESP32 button through the Modal agent and its tools to the speaker](media/confio-architecture.svg)](media/confio-architecture.svg)
 
-| Component or tool | Role in Confio |
+| Component or tool | How Confio uses it |
 | --- | --- |
 | ESP32 DevKit | Reads the push-to-talk button, streams microphone audio over Wi-Fi, and plays the audio returned by the agent. |
 | INMP441 microphone | Captures the user's voice while they hold the push-to-talk button. |
