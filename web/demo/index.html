@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confio · Try the device</title>
+<link rel="stylesheet" href="/call-style.css">
+<link rel="stylesheet" href="/assets/demo.css">
+<script src="/assets/demo.js" defer></script>
+</head>
+<body>
+<main>
+<div class="grid">
+<section class="voice-panel" aria-label="Talk with Confio Agent">
+<div class="call-card">
+  <div class="call-details">
+    <div class="call-meta"><span class="status-dot" aria-hidden="true"></span>Confio</div>
+    <h1>Confio Agent</h1>
+    <div class="controls">
+      <div class="control">
+        <button id="talk" class="round-button mute-button" aria-label="Hold to talk">
+          <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="12" y="3" width="8" height="16" rx="4" fill="currentColor"/><path d="M8 14v2a8 8 0 0 0 16 0v-2M16 24v5M11 29h10" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </button>
+        <span>Hold to talk</span>
+      </div>
+      <div class="control">
+        <button id="hangup" class="round-button stop-button" aria-label="End call" disabled>
+          <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="7" y="7" width="18" height="18" rx="5" fill="currentColor"/></svg>
+        </button>
+        <span>End call</span>
+      </div>
+    </div>
+  </div>
+  <div class="portrait brain-portrait" aria-hidden="true">
+  <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 16c-3-10-17-8-18 2-8 0-12 10-7 16-4 8 1 16 9 17 4 7 13 7 16 0V16Zm0 0c3-10 17-8 18 2 8 0 12 10 7 16 4 8-1 16-9 17-4 7-13 7-16 0"/>
+    <path d="M14 18c0 6 4 9 9 9m-16 7c7-2 12 1 13 7m-4 10c0-4 3-6 7-6m27-27c0 6-4 9-9 9m16 7c-7-2-12 1-13 7m4 10c0-4-3-6-7-6"/>
+  </svg>
+</div>
+</div>
+<div id="meter" aria-hidden="true"><div></div></div>
+<p id="status" role="status"></p>
+<form id="typed"><input id="request" maxlength="500" placeholder="Or type a request" aria-label="Request"><button>Send</button></form>
+<div class="examples">
+<button data-request="What is the latest news in Lima?">Search the web</button>
+<button data-request="I want to take a photo">Prepare a photo</button>
+<button data-request="I'm ready. Take the photo.">Take photo</button>
+<button data-request="Send the photo to Juan with the message: Take a look at this.">Share photo</button>
+<button data-request="Call Juan">Call Juan</button>
+</div>
+</section>
+<section aria-labelledby="camera-title">
+<h2 id="camera-title">ESP32-CAM</h2>
+<div class="camera-actions">
+<button id="webcam" type="button">Use webcam</button>
+<button id="capture-webcam" type="button" hidden disabled>Capture photo</button>
+</div>
+<video id="camera-preview" autoplay muted playsinline hidden aria-label="Webcam preview"></video>
+<figure><img id="before-image" src="/sample.jpg" alt="Original camera photo"><figcaption id="before-caption">Before · camera sample</figcaption></figure>
+<figure id="after" hidden><img alt="Restored camera image"><figcaption>After · Meta Muse Image</figcaption></figure>
+<p id="photo-status">Ask to take a photo, then tell Confio when you’re ready.</p>
+</section>
+<section aria-labelledby="phone-title">
+<h2 id="phone-title">Demo phone</h2>
+<div class="phone">
+  <div class="notch"></div>
+  <div id="incoming-call" class="incoming-call" hidden>
+    <div class="incoming-copy"><strong>Confio Agent</strong><span>{{DEMO_CALLER_ID}}</span></div>
+    <button id="decline-call" class="call-action decline-call" aria-label="Decline call" title="Decline">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 14v-2c0-1.3 4-3.5 9-3.5s9 2.2 9 3.5v2a1.5 1.5 0 0 1-1.8 1.5l-3-.6a1.5 1.5 0 0 1-1.2-1.5v-1.1a13 13 0 0 0-6 0v1.1a1.5 1.5 0 0 1-1.2 1.5l-3 .6A1.5 1.5 0 0 1 3 14Z" fill="currentColor"/></svg>
+    </button>
+    <button id="accept-call" class="call-action accept-call" aria-label="Answer call" title="Answer">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.6 2.8 2.5 4.3c.3.5.2 1-.2 1.4l-1.8 1.8a15 15 0 0 0 6.7 6.7l1.8-1.8c.4-.4.9-.5 1.4-.2l4.2 2.5c.5.3.7.8.5 1.3-.5 1.6-1.8 3.1-3.7 3.1C10 21.8 2.2 14 2.2 6c0-1.9 1.5-3.2 3.1-3.7.5-.2 1 .1 1.3.5Z" fill="currentColor"/></svg>
+    </button>
+  </div>
+  <span class="badge">SIMULATED</span>
+  <p id="phone-status" role="status">No activity yet</p>
+  <div id="inbox"></div>
+</div>
+</section>
+</div>
+<section id="conversation" aria-live="polite">
+<h2>Conversation</h2>
+<div id="history" role="log" aria-label="Conversation history"></div>
+<audio id="audio" controls hidden></audio>
+</section>
+</main>
+</body>
+</html>

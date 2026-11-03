@@ -1,111 +1,95 @@
 # Confio
 
-A simple gadget and personal AI agent for older adults who don't use smartphones.
+Confio is a voice assistant for older adults who find smartphones difficult to
+use. It started with my aunt, who lives mostly on her own. A large button lets
+her ask a question, call a saved contact or share a photo by speaking.
 
-Confio is being built for the **Meta Global AI Developer Hackathon** (submission due November 4, 2026). Its first user is an aunt who lives almost alone. The goal is to give her a helper she can use by pressing a button and talking, with no screen and no apps.
+Built for the Meta Global AI Developer Hackathon. The prototype connects a
+handheld ESP32 voice device and a separate ESP32-CAM to an agent running on
+Modal.
 
-> **Status:** early, work in progress. This README describes the project at a high level. Details will change as we build step by step.
+## Try the demo
 
-## WiFi device and Modal deployment
+The browser demo provides a **Confio Agent** card, an **ESP32-CAM** panel and a
+**Demo phone**. It runs the same agent and photo tools with browser or sample
+inputs. You can try it from this repository without an ESP32.
 
-The `codex/modal-wifi` branch moves the existing voice agent and all its tools to
-Modal. The voice board and handheld camera connect over authenticated WiFi;
-buttons, wiring and the spoken interaction stay the same. Supabase remains the
-photo store. The original USB/local firmware targets remain available.
-See [deployment, firmware and CI/CD](deploy/README.md).
+![Illustrated guide to the agent card, camera, demo phone and conversation](web/demo/docs/controls.svg)
 
-## Voice photo sharing
+### Start locally
 
-The current photo flow is: ask by voice, aim the separately powered ESP32-CAM,
-say when ready, restore with Muse Image, save to Supabase Storage and send the
-link by Telnyx SMS to a saved contact. See [setup and testing](scripts/PHOTOS.md).
-The original object-finding roadmap below remains historical context.
-
-## The idea
-
-Many older adults find smartphones confusing, but they can still benefit from an AI assistant. Confio puts that assistant behind a handheld device with a few large buttons. The user presses a button, asks a question out loud in Spanish, and gets a spoken answer.
-
-## First target flow: "Where is my bottle?"
-
-1. **Press a button.** The user presses **Ver** ("Look") on the handheld gadget, and it notifies the laptop over WiFi.
-2. **Ask out loud.** The laptop records the question (for example, *"¿Dónde está mi botella?"*) and turns it into text.
-3. **Agent reasoning.** The agent works out what the user wants, picks the target object ("bottle"), and decides to use the camera.
-4. **Take a photo.** The agent asks a camera fixed in the room for a photo.
-5. **Look for the object.** The agent runs a vision model on the photo to find the object.
-6. **Search the room.** If the object isn't found, the camera rotates on a servo and tries again until it finds it or has scanned the whole room.
-7. **Answer by voice.** The agent replies in Spanish (for example, *"Está en la mesa, a la izquierda"*) or says it couldn't find the object.
-
-## Components
-
-| Part | What it does |
-|------|--------------|
-| **Gadget** | ESP32 DevKit with three buttons: *Llamar* (Call), *Ver* (Look), *Investigar* (Research). |
-| **Camera** | ESP32-CAM (OV2640) mounted on a servo, fixed in the room. |
-| **Laptop** | Runs the Python agent, with a microphone and speaker for now. |
-| **Models** | Meta API in the cloud: Muse Spark for reasoning, SAM 3.1 for finding objects. |
-
-## Agent tools (initial)
-
-- `take_photo()` gets an image from the ESP32-CAM.
-- `rotate_camera(angle)` moves the servo (for example 0 / 90 / 180).
-- `find_object(image, name)` uses SAM 3.1 to report whether the object was found and where.
-- `speak(text)` says the answer out loud.
-
-## Roadmap
-
-1. Button to laptop, laptop audio, one photo plus SAM, spoken answer.
-2. Add the servo search loop.
-3. Move the microphone and speaker onto the gadget (INMP441 + MAX98357).
-4. Later: the *Llamar* and *Investigar* buttons.
-
-## INMP441 microphone capture
-
-The standalone microphone capture in [`esp32/mic/`](esp32/mic/README.md) is
-validated on hardware. Hold the button to record and release it to save a local
-WAV. The working signal pins are SCK 18, WS 5 and SD 22, with the button on 23.
-This capture is not yet connected to speech recognition or the call agent.
-
-## MAX98357A speaker playback
-
-[`esp32/speaker/`](esp32/speaker/README.md) embeds the retained voice WAV and
-plays it through the MAX98357A and 8-ohm, 3 W speaker. Hardware playback was
-confirmed at 80% PCM amplitude with BCLK 16, LRC 17 and DIN 19. After upload,
-USB supplies power only; unplug it to stop the repeating sample. This standalone
-firmware replaces microphone capture until that project's firmware is restored.
-
-## Principles
-
-- Keep it simple and demo-first.
-- The user-facing language is Spanish; code and docs are in English.
-
-## Call button preview
-
-The protoboard Call button (GPIO 26) and Look button (GPIO 27) have been verified
-by the user. The Call UI prototype lives in `web/call/` on branch
-`codex/llamar-prototype`.
-
-Close PlatformIO Serial Monitor and run from the repository root:
+Use Python 3.12 or 3.13. Run from the repository root.
 
 ```sh
-~/.platformio/penv/bin/python scripts/call_preview.py
+git clone https://github.com/JuanMontreuil08/confio.git
+cd confio
+python3 -m venv .venv-demo
+source .venv-demo/bin/activate
+python -m pip install -r deploy/requirements.txt
 ```
 
-Open **http://localhost:8765/** to preview it immediately. Pressing Call also
-prints the URL and opens the page. For a real browser-to-phone audio test:
+Set `META_API_KEY` and `CARTESIA_API_KEY` in your shell or in a local, ignored
+`.env` at the repo root. Use a Meta key with access to Muse Spark, Muse Voice
+Transcribe and Muse Image. Then start the demo.
 
 ```sh
-python3 -m pip install -r scripts/call-requirements.txt -r scripts/telnyx-requirements.txt
-python3 scripts/call_preview.py --live --to "+51XXXXXXXXX"
+python web/demo/server.py
 ```
 
-Click **Talk with your agent** and allow the microphone. The phone's voice drives
-the waveform; Mute silences your microphone and End call hangs up. No AI agent
-is connected yet. See [the browser call instructions](web/call/README.md).
+Open [localhost:8080](http://localhost:8080). The keys stay on the server.
+The demo uses a bundled ESP32-CAM sample by default. To configure a specific
+Supabase photo, see [demo configuration](web/demo/README.md).
 
-## Telnyx call test setup
+### What to press
 
-The Voice API application and temporary signed webhook receiver are configured.
-See [the local Telnyx setup](scripts/TELNYX.md) for connection values and commands.
-The user confirmed the full button-to-browser call flow, two-way audio, remote
-voice waves, microphone mute and hangup. Replace the example destination in the
-commands with your own number; the personal test number is not committed.
+| Try | What to do | What to look for |
+| --- | --- | --- |
+| **Talk to Confio** | Hold the microphone button, ask “What time is it in Lima?”, then release it. Allow microphone access when prompted. You can also type the request and press **Send**. | Your request appears in **Conversation**. The animated dots indicate that Confio is working. The transcript and spoken answer follow. |
+| **Search the web** | Press **Search the web** or ask “What's the latest news in Lima?” | Muse Spark searches the web and names the sources it used in the response. |
+| **Send a text SMS** | Say or type “Send Juan an SMS that says I arrived safely.” | The text appears in the simulated phone inbox. |
+| **Answer, decline or end a call** | Press **Call Juan** or say “Call Juan.” On the phone, press the green button to answer or the red button to decline. If you answer, press **End call** on the agent card. | An incoming call banner displays Confio's caller ID. The phone shows whether the simulated call connected, was declined or ended. |
+| **Restore a sample photo** | Press **Prepare a photo**, then **Take photo**. You can also say “I want to take a photo,” wait for Confio to ask you to aim, then say “I'm ready. Take the photo.” | **Before** shows the original ESP32-CAM sample. **After** appears once Muse Image restores it. |
+| **Restore a webcam photo** | In **ESP32-CAM**, press **Use webcam**, allow access, frame the image and press **Capture photo**. | The captured frame becomes **Before**. Muse Image produces **After**. |
+| **Share the photo** | After restoring a photo, press **Share photo** or say “Send the photo to Juan with the message: Take a look at this.” To skip a caption, say “Send only the photo to Juan.” | The simulated phone shows the restored photo and any dictated text. If you ask to share a photo without specifying whether to include text, Confio asks once before sending. |
+
+<details>
+<summary>See an original camera sample included in the repository</summary>
+
+![Original low-light JPEG captured by Confio's ESP32-CAM](media/camera-test-2.jpg)
+
+</details>
+
+### Live and simulated behavior
+
+- **Live** — Meta speech transcription, Muse Spark reasoning and web search,
+  Muse Image restoration, and Cartesia speech playback.
+- **Simulated** — the ESP32 button and camera input, phone connection and SMS
+  delivery. Demo calls and messages stay in the demo. Photo saves are local to
+  the demo session.
+- **Physical prototype** — the ESP32 streams audio and the ESP32-CAM sends
+  captured frames. The deployed agent stores photos in private Supabase Storage
+  and uses Telnyx for real calls and SMS to saved contacts.
+
+## Stack
+
+| Layer | Technology |
+| --- | --- |
+| Device | ESP32 DevKit, INMP441 I2S microphone, MAX98357A I2S amplifier, speaker and two buttons |
+| Camera | ESP32-CAM with OV2640 |
+| Firmware | Arduino C++ and PlatformIO, with authenticated WebSockets over WiFi |
+| Agent | Python and aiohttp, hosted on Modal with GitHub Actions CI/CD |
+| Meta models | Muse Voice Transcribe for speech input, Muse Spark for reasoning and tools, Muse Image for restoration |
+| Integrations | Cartesia for speech output, Supabase Storage for private photos, Telnyx for calls and SMS |
+| Judge demo | HTML, CSS, JavaScript and the existing Python agent |
+
+## Source and hardware
+
+- [Browser demo setup](web/demo/README.md)
+- [Agent prompt](prompts/assistant_system.md) and [photo and SMS tools](scripts/photo_tools.py)
+- [Firmware and Modal deployment](deploy/README.md)
+- [ESP32 voice wiring and local testing](esp32/voice/README.md)
+- [ESP32-CAM firmware](esp32/camera/README.md)
+
+The original contributions for this hackathon are the push-to-talk voice device,
+the camera and photo-sharing workflow, the tool-driven agent and its WiFi
+deployment, and the hardware-free browser demo.

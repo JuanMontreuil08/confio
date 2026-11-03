@@ -62,10 +62,10 @@ def to_wav(mono_pcm):
     return buffer.getvalue()
 
 
-def transcribe(session, api_key, wav_bytes):
+def transcribe(session, api_key, wav_bytes, languages=("spanish",)):
     """Sends one WAV to Muse Voice Transcribe and returns the transcript."""
     request = {"mode": "PUSH_TO_TALK", "model": TRANSCRIBE_MODEL,
-               "audioEncoding": "WAV", "languageBias": ["spanish"]}
+               "audioEncoding": "WAV", "languageBias": list(languages)}
     response = session.post(
         TRANSCRIBE_URL,
         headers={"Authorization": f"Bearer {api_key}"},
@@ -193,13 +193,13 @@ def answer(client, system_prompt, question, model=CHAT_MODEL, effort=REASONING_E
             raise RuntimeError(f"Model still requesting tools after {max_rounds} rounds")
 
 
-def synthesize(session, api_key, voice_id, text):
+def synthesize(session, api_key, voice_id, text, language="es"):
     """Returns Cartesia speech as raw mono 16 kHz 16-bit PCM, ready for the ESP32."""
     response = session.post(
         CARTESIA_URL,
         headers={"Authorization": f"Bearer {api_key}", "Cartesia-Version": CARTESIA_VERSION},
         json={"model_id": TTS_MODEL, "transcript": text, "voice": {"id": voice_id},
-              "language": "es",
+              "language": language,
               "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": SAMPLE_RATE}},
         timeout=HTTP_TIMEOUT,
     )
