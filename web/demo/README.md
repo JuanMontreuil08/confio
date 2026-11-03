@@ -42,3 +42,20 @@ the simulated banner. It defaults to a fictional number.
 This entry point binds to localhost. For public judging, use a separate HTTPS
 deployment with server-side secrets and a request budget. The physical device
 and production deployment are documented in [the hardware guide](../../deploy/README.md).
+
+## Deploy the judge demo to Modal
+
+Create a `confio-demo` Modal Secret in the `main` environment. Set only the
+Meta and Cartesia keys and, optionally, the sample and caller ID settings
+above. For an upside-down sample, set `CONFIO_DEMO_SAMPLE_ROTATE_180=1`.
+The demo uses its own app and keeps the phone simulation local.
+
+```sh
+python -m pip install -r deploy/tooling-requirements.txt
+python -m modal deploy -e main web/demo/modal_app.py
+```
+
+Use the HTTPS URL printed by Modal. The public mode limits each session to
+15 turns and three photo attempts, with at most two simultaneous turns and
+60 turns per hour per running container. These in-memory limits reset when
+Modal replaces the container. Provider budgets are separate.

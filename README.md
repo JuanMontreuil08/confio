@@ -10,6 +10,8 @@ Modal.
 
 ## Try the demo
 
+**[Open the live demo](https://juanmontreuil71--confio-judge-demo.us-east.modal.run/)**. No account, API key or hardware is required to try the hosted version.
+
 The browser demo provides a **Confio Agent** card, an **ESP32-CAM** panel and a
 **Demo phone**. It runs the same agent and photo tools with browser or sample
 inputs. You can try it from this repository without an ESP32.

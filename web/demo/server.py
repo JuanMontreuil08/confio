@@ -1,6 +1,8 @@
 """Standalone Confio judge demo. Run with python web/demo/server.py."""
+import argparse
 import asyncio
 import base64
+from collections import deque
 import json
 from html import escape
 import os
@@ -66,6 +68,8 @@ class DemoSession:
         self.providers = DemoProviders()
         self.touched = time.monotonic()
         self.busy = False
+        self.turn_count = 0
+        self.photo_count = 0
         self.call_state = "idle"
         directory = Path(self.folder.name)
         config = {"SUPABASE_URL": "https://demo.invalid", "SUPABASE_SECRET_KEY": "demo",
@@ -95,6 +99,10 @@ class DemoSession:
 
         def run(name, arguments):
             nonlocal restored_photo_id
+            if name == "take_photo" and os.getenv("CONFIO_DEMO_PUBLIC") == "1" and agent.capture_result is None:
+                if self.photo_count >= 3:
+                    return {"error": "This demo session has reached its photo limit."}
+                self.photo_count += 1
             capture = self.photos.capture
             if name == "take_photo" and webcam is not None:
                 self.photos.capture = lambda: webcam
@@ -149,11 +157,18 @@ class DemoSession:
 
 def create_app(sample):
     sessions = {}
+    recent_turns = deque()
+    public = os.getenv("CONFIO_DEMO_PUBLIC") == "1"
     app = web.Application(client_max_size=2 * 1024 * 1024)
 
     async def turn(request):
         data = await request.read()
         now = time.monotonic()
+        if public:
+            while recent_turns and now - recent_turns[0] >= 3600:
+                recent_turns.popleft()
+            if len(recent_turns) >= 60 or sum(session.busy for session in sessions.values()) >= 2:
+                raise web.HTTPTooManyRequests(text="The demo is at capacity. Try again later.")
         for key, session in list(sessions.items()):
             if not session.busy and now - session.touched > 300:
                 sessions.pop(key).folder.cleanup()
@@ -181,6 +196,11 @@ def create_app(sample):
             text = "" if audio else data.decode("utf-8", errors="replace").strip()
         if audio is None and not 0 < len(text) <= 500:
             raise web.HTTPBadRequest(text="Enter a short request.")
+        if public:
+            if state.turn_count >= 15:
+                raise web.HTTPTooManyRequests(text="This demo session has reached its turn limit.")
+            state.turn_count += 1
+            recent_turns.append(now)
         state.busy = True
         try:
             result = await asyncio.to_thread(state.turn, text, audio, language, webcam)
@@ -191,7 +211,7 @@ def create_app(sample):
             state.busy = False
             state.touched = time.monotonic()
         response = web.json_response(result)
-        response.set_cookie("confio_demo", key, httponly=True, samesite="Strict", secure=request.secure)
+        response.set_cookie("confio_demo", key, httponly=True, samesite="Strict", secure=public or request.secure)
         return response
 
     async def accept_call(request):
@@ -233,7 +253,13 @@ def create_app(sample):
 
 
 if __name__ == "__main__":
-    load_dotenv(ROOT / ".env")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--public", action="store_true")
+    args = parser.parse_args()
+    if args.public:
+        os.environ["CONFIO_DEMO_PUBLIC"] = "1"
+    else:
+        load_dotenv(ROOT / ".env")
     if not all(os.getenv(key) for key in ("META_API_KEY", "CARTESIA_API_KEY")):
         raise SystemExit("Set META_API_KEY and CARTESIA_API_KEY in your environment or ignored .env.")
-    web.run_app(create_app(sample_image()), host="127.0.0.1", port=8080)
+    web.run_app(create_app(sample_image()), host="0.0.0.0" if args.public else "127.0.0.1", port=8080)
