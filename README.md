@@ -36,7 +36,7 @@ Confio uses Wi-Fi and replaces the smartphone interface with a physical button, 
 | Telnyx | Connects phone calls and sends text messages or photo links to saved contacts. |
 | ESP32-CAM | Takes a photo on request and sends the captured JPEG to the agent over Wi-Fi. |
 | Supabase Storage | Stores the original and restored photos in a private bucket and provides expiring links for sharing. |
-| Cartesia | Converts the agent's written reply into speech for playback on the device. |
+| Cartesia Sonic 3.6 | Converts the agent's written reply into speech for playback on the device. |
 | MAX98357A amplifier and speaker | Amplifies the ESP32's digital audio output and plays it aloud. |
 
 ## 4. Demo
