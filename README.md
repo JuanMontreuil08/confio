@@ -42,6 +42,7 @@ Confio uses Wi-Fi and replaces the smartphone interface with a physical button, 
 ## 4. Demo
 
 [![Try the live demo](https://img.shields.io/badge/Try%20the%20live%20demo-0969DA?style=for-the-badge)](https://juanmontreuil71--confio-judge-demo.us-east.modal.run/)
+[![Watch the recorded demo on Google Drive](https://img.shields.io/badge/Watch%20the%20recorded%20demo-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/file/d/1j4StzouzDu1TyzcqNIEJ2ADE51BxQjYq/view?usp=sharing)
 
 ## 5. Next Steps · From a Prototype to Everyday Independence
 
