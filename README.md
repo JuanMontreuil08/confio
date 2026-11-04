@@ -44,6 +44,14 @@ Confio uses Wi-Fi and replaces the smartphone interface with a physical button, 
 [![Try the live demo](https://img.shields.io/badge/Try%20the%20live%20demo-0969DA?style=for-the-badge)](https://juanmontreuil71--confio-judge-demo.us-east.modal.run/)
 [![Watch the recorded demo on Google Drive](https://img.shields.io/badge/Watch%20the%20recorded%20demo-4285F4?style=for-the-badge&logo=googledrive&logoColor=white)](https://drive.google.com/file/d/1j4StzouzDu1TyzcqNIEJ2ADE51BxQjYq/view?usp=sharing)
 
+Suggested flows to try on the Live Demo website:
+
+- **Talk or type.** Allow microphone access, hold the microphone button while speaking, then release to send. You can also type a request and click **Send**, or use the preset buttons.
+- **Search.** Click **Search the web** to ask for the latest news in Lima.
+- **Restore a photo.** Click **Prepare a photo**, then **Take photo** to process the sample already shown. Or click **Use webcam**, allow camera access, and click **Capture photo** to process your own picture. Compare the original and restored images.
+- **Share or send a message.** After taking a photo, click **Share photo**. Or type “Send Juan an SMS saying hello.” The result appears in the **Demo phone**.
+- **Try a call.** Click **Call Juan**, answer or decline on the **Demo phone**, and use **End call** to hang up. Calls and SMS are simulated; no real recipient is contacted.
+
 ## 5. Next Steps · From a Prototype to Everyday Independence
 
 - **Portable hardware.** Shrink the circuit and put it in a 3D-printed enclosure so people can carry Confio around the house.
